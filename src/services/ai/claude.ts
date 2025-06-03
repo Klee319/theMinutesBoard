@@ -8,7 +8,7 @@ export class ClaudeService extends BaseAIService {
     transcripts: Transcript[], 
     settings: UserSettings
   ): Promise<Minutes> {
-    const enhancedPrompt = this.createEnhancedPrompt(transcripts, settings)
+    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings)
     
     try {
       const response = await fetch(`${this.baseURL}/messages`, {
@@ -91,9 +91,42 @@ export class ClaudeService extends BaseAIService {
     }
   }
 
-  private createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): string {
+  async generateContent(prompt: string, modelId?: string): Promise<string> {
+    try {
+      const response = await fetch(`${this.baseURL}/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.apiKey,
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-haiku-20241022',
+          max_tokens: 2000,
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ]
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`Claude API error: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      return data.content[0]?.text || ''
+    } catch (error) {
+      console.error('Failed to generate content with Claude:', error)
+      throw new Error('コンテンツの生成に失敗しました')
+    }
+  }
+
+  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): Promise<string> {
     const formattedTranscript = this.formatTranscriptsEnhanced(transcripts)
-    const basePrompt = settings.promptTemplate || this.getDefaultPrompt()
+    const basePrompt = await this.getEnhancedPrompt(settings)
     
     return `${basePrompt}
 

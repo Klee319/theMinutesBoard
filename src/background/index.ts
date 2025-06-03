@@ -1,9 +1,12 @@
-import { ChromeMessage, MessageType, StorageData, Meeting } from '@/types'
+import { ChromeMessage, MessageType, StorageData, Meeting, UserSettings } from '@/types'
 import { geminiService } from '@/services/gemini'
 import { AIServiceFactory } from '@/services/ai/factory'
 
 let currentMeetingId: string | null = null
 let recordingTabId: number | null = null
+
+// 議事録生成の排他制御
+let isMinutesGenerating = false
 
 // 起動時に前回の状態を確認
 chrome.runtime.onStartup.addListener(() => {
@@ -79,6 +82,15 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
           .then(result => sendResponse(result))
           .catch(error => {
             console.error('Error focusing tab:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+
+      case 'CALL_ENDED':
+        handleCallEnded(message.reason || 'Unknown', message.timestamp || new Date().toISOString(), sender.tab?.id)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error handling call end:', error)
             sendResponse({ success: false, error: error.message })
           })
         return true
@@ -221,9 +233,17 @@ async function handleTranscriptUpdate(transcript: any): Promise<void> {
 }
 
 async function handleGenerateMinutes(): Promise<any> {
+  // 既に議事録生成中の場合は待機
+  if (isMinutesGenerating) {
+    return { success: false, error: '議事録を生成中です。しばらくお待ちください。' }
+  }
+
   return new Promise(async (resolve) => {
+    isMinutesGenerating = true // 生成開始をマーク
+    
     chrome.storage.local.get(['meetings', 'settings'], async (result) => {
       if (chrome.runtime.lastError) {
+        isMinutesGenerating = false
         resolve({ success: false, error: chrome.runtime.lastError.message })
         return
       }
@@ -232,11 +252,13 @@ async function handleGenerateMinutes(): Promise<any> {
       const currentMeeting = meetings.find(m => m.id === currentMeetingId)
       
       if (!currentMeeting) {
+        isMinutesGenerating = false
         resolve({ success: false, error: '記録中の会議がありません' })
         return
       }
       
       if (currentMeeting.transcripts.length === 0) {
+        isMinutesGenerating = false
         resolve({ success: false, error: 'まだ発言が記録されていません' })
         return
       }
@@ -269,6 +291,8 @@ async function handleGenerateMinutes(): Promise<any> {
           meetings[meetingIndex].minutes = minutes
           
           chrome.storage.local.set({ meetings }, () => {
+            isMinutesGenerating = false // 生成完了をマーク
+            
             if (chrome.runtime.lastError) {
               resolve({ success: false, error: chrome.runtime.lastError.message })
             } else {
@@ -289,6 +313,7 @@ async function handleGenerateMinutes(): Promise<any> {
         }
       } catch (error: any) {
         console.error('Error generating minutes:', error)
+        isMinutesGenerating = false // エラー時も生成完了をマーク
         resolve({ 
           success: false, 
           error: error.message || '議事録の生成中にエラーが発生しました' 
@@ -352,6 +377,8 @@ function generateTranscriptId(): string {
   return `transcript_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
 
+
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === recordingTabId) {
     handleStopRecording()
@@ -363,3 +390,56 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     handleStopRecording()
   }
 })
+
+async function handleCallEnded(reason: string, timestamp: string, tabId?: number): Promise<{ success: boolean }> {
+  console.log('Call ended detected in background:', { reason, timestamp, tabId, currentMeetingId, recordingTabId })
+  
+  // 現在記録中の会議があり、該当タブからの通知の場合のみ処理
+  if (!currentMeetingId || (tabId && tabId !== recordingTabId)) {
+    console.log('No active recording or tab mismatch, ignoring call end')
+    return { success: true }
+  }
+  
+  try {
+    // 会議終了時刻を記録
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meetingIndex = meetings.findIndex(m => m.id === currentMeetingId)
+    if (meetingIndex !== -1) {
+      meetings[meetingIndex].endTime = new Date(timestamp)
+      meetings[meetingIndex].callEndReason = reason
+      
+      // 会議データを保存
+      await new Promise<void>((resolve) => {
+        chrome.storage.local.set({ meetings }, () => {
+          resolve()
+        })
+      })
+      
+      console.log('Meeting end time updated:', meetings[meetingIndex])
+    }
+    
+    // 記録状態をクリア
+    currentMeetingId = null
+    recordingTabId = null
+    isMinutesGenerating = false
+    
+    // ストレージの状態もクリア
+    await new Promise<void>((resolve) => {
+      chrome.storage.local.remove(['currentMeetingId'], () => {
+        resolve()
+      })
+    })
+    
+    console.log('Call end handling completed successfully')
+    return { success: true }
+    
+  } catch (error) {
+    console.error('Error handling call end:', error)
+    throw error
+  }
+}

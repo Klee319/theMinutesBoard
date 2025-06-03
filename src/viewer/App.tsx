@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Meeting, Minutes } from '@/types'
+import { Meeting, Minutes, Transcript } from '@/types'
 
 function App() {
   const [currentMeeting, setCurrentMeeting] = useState<Meeting | null>(null)
@@ -8,6 +8,7 @@ function App() {
   const [isLiveMode, setIsLiveMode] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [isDownloadDropdownOpen, setIsDownloadDropdownOpen] = useState(false)
+  const [isMinutesGenerating, setIsMinutesGenerating] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -64,6 +65,10 @@ function App() {
         if (current) {
           setCurrentMeeting(current)
           setLastUpdated(new Date())
+          // 議事録生成完了を検知
+          if (current.minutes && isMinutesGenerating) {
+            setIsMinutesGenerating(false)
+          }
         }
       }
     })
@@ -83,6 +88,8 @@ function App() {
   const generateMinutes = () => {
     if (!currentMeeting?.id) return
     
+    setIsMinutesGenerating(true)
+    
     chrome.runtime.sendMessage({
       type: 'GENERATE_MINUTES'
     }, (response) => {
@@ -90,17 +97,11 @@ function App() {
         // 成功通知は不要（自動更新される）
       } else {
         alert('エラー: ' + (response?.error || '議事録の生成に失敗しました'))
+        setIsMinutesGenerating(false)
       }
     })
   }
 
-  const regenerateMinutes = () => {
-    if (!currentMeeting?.id) return
-    
-    if (confirm('議事録を完全に再生成しますか？')) {
-      generateMinutes()
-    }
-  }
 
   const stopRecording = () => {
     if (!currentMeeting?.id) return
@@ -212,18 +213,18 @@ function App() {
                     </button>
                     <button
                       onClick={generateMinutes}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                      disabled={isMinutesGenerating}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center gap-2"
                     >
-                      {currentMeeting.minutes ? '📝 議事録を更新' : '✨ 議事録生成'}
+                      {isMinutesGenerating ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          <span>生成中...</span>
+                        </>
+                      ) : (
+                        currentMeeting.minutes ? '📝 議事録を更新' : '✨ 議事録生成'
+                      )}
                     </button>
-                    {currentMeeting.minutes && (
-                      <button
-                        onClick={regenerateMinutes}
-                        className="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors"
-                      >
-                        🔄 完全再生成
-                      </button>
-                    )}
                   </>
                 )}
                 
@@ -322,6 +323,7 @@ function App() {
 
           {/* メインコンテンツ */}
           <div className={isLiveMode ? 'col-span-12' : 'col-span-9'}>
+            
             {displayMeeting ? (
               <div className="bg-white rounded-lg shadow-sm">
                 {/* 会議情報ヘッダー */}
@@ -377,9 +379,17 @@ function App() {
                       {isLiveMode && currentMeeting && (
                         <button
                           onClick={generateMinutes}
-                          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                          disabled={isMinutesGenerating}
+                          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center gap-2 mx-auto"
                         >
-                          ✨ 議事録を生成する
+                          {isMinutesGenerating ? (
+                            <>
+                              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              <span>生成中...</span>
+                            </>
+                          ) : (
+                            '✨ 議事録を生成する'
+                          )}
                         </button>
                       )}
                     </div>

@@ -370,7 +370,7 @@ function App() {
                       {showApiKey ? '👁️' : '👁️‍🗨️'}
                     </button>
                     <button
-                      onClick={() => validateApiKey(getCurrentApiKey())}
+                      onClick={() => validateApiKey(getCurrentApiKey() || '')}
                       disabled={!getCurrentApiKey() || checkingApiKey}
                       className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
                       title="APIキーの有効性を確認"

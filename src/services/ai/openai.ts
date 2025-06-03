@@ -8,7 +8,7 @@ export class OpenAIService extends BaseAIService {
     transcripts: Transcript[], 
     settings: UserSettings
   ): Promise<Minutes> {
-    const enhancedPrompt = this.createEnhancedPrompt(transcripts, settings)
+    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings)
     
     try {
       const response = await fetch(`${this.baseURL}/chat/completions`, {
@@ -78,9 +78,42 @@ export class OpenAIService extends BaseAIService {
     }
   }
 
-  private createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): string {
+  async generateContent(prompt: string, modelId?: string): Promise<string> {
+    try {
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_tokens: 2000,
+          temperature: 0.7
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`OpenAI API error: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      return data.choices[0]?.message?.content || ''
+    } catch (error) {
+      console.error('Failed to generate content with OpenAI:', error)
+      throw new Error('コンテンツの生成に失敗しました')
+    }
+  }
+
+  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): Promise<string> {
     const formattedTranscript = this.formatTranscriptsEnhanced(transcripts)
-    const basePrompt = settings.promptTemplate || this.getDefaultPrompt()
+    const basePrompt = await this.getEnhancedPrompt(settings)
     
     return `${basePrompt}
 

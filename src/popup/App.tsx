@@ -20,7 +20,7 @@ function App() {
       setRecentMeetings(meetings.slice(-5).reverse())
       
       if (result.currentMeetingId) {
-        const current = meetings.find(m => m.id === result.currentMeetingId)
+        const current = meetings.find((m: Meeting) => m.id === result.currentMeetingId)
         if (current && !current.endTime) {
           setCurrentMeeting(current)
           setIsRecording(true)

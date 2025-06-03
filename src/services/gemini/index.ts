@@ -35,8 +35,8 @@ export class GeminiService extends BaseAIService {
       throw new Error('Gemini API key not configured')
     }
     
-    // より高品質な議事録生成のための改善されたプロンプト
-    const enhancedPrompt = this.createEnhancedPrompt(transcripts, settings)
+    // プロンプトファイルを優先的に使用した改善されたプロンプト
+    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings)
     
     try {
       const result = await this.model.generateContent(enhancedPrompt)
@@ -86,6 +86,21 @@ export class GeminiService extends BaseAIService {
       limit: 15
     }
   }
+
+  async generateContent(prompt: string, modelId?: string): Promise<string> {
+    if (!this.model) {
+      throw new Error('Gemini API key not configured')
+    }
+
+    try {
+      const result = await this.model.generateContent(prompt)
+      const response = await result.response
+      return response.text()
+    } catch (error) {
+      console.error('Failed to generate content:', error)
+      throw new Error('コンテンツの生成に失敗しました')
+    }
+  }
   
   private formatTranscripts(transcripts: Transcript[]): string {
     return transcripts
@@ -93,27 +108,13 @@ export class GeminiService extends BaseAIService {
       .map(t => `[${new Date(t.timestamp).toLocaleTimeString()}] ${t.speaker}: ${t.content}`)
       .join('\n')
   }
-  
-  private calculateDuration(transcripts: Transcript[]): number {
-    if (transcripts.length === 0) return 0
-    
-    const timestamps = transcripts.map(t => new Date(t.timestamp).getTime())
-    const start = Math.min(...timestamps)
-    const end = Math.max(...timestamps)
-    
-    return Math.floor((end - start) / 1000)
-  }
-  
-  private getUniqueParticipants(transcripts: Transcript[]): string[] {
-    const participants = new Set(transcripts.map(t => t.speaker))
-    return Array.from(participants)
-  }
 
-  private createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): string {
+  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): Promise<string> {
     const analysis = this.analyzeTranscriptQuality(transcripts)
     const formattedTranscript = this.formatTranscriptsEnhanced(transcripts)
     
-    const basePrompt = settings.promptTemplate || this.getDefaultPrompt()
+    // プロンプトファイルを優先的に使用（設定のプロンプトテンプレートより優先）
+    const basePrompt = await this.getEnhancedPrompt(settings)
     
     return `${basePrompt}
 
@@ -191,7 +192,7 @@ ${formattedTranscript}
     return { quality, issues }
   }
 
-  private formatTranscriptsEnhanced(transcripts: Transcript[]): string {
+  protected formatTranscriptsEnhanced(transcripts: Transcript[]): string {
     const sortedTranscripts = transcripts.sort((a, b) => 
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     )
@@ -230,25 +231,6 @@ ${formattedTranscript}
       .join('\n\n')
   }
 
-  private getDefaultPrompt(): string {
-    return `あなたは会議の議事録作成の専門家です。以下の文字起こしから、構造化された議事録を作成してください。
-
-**議事録作成の指針:**
-1. 会議の目的と主要な議題を特定
-2. 各参加者の主要な発言を要約
-3. 重要な決定事項やアクションアイテムを明確に記録
-4. 日本語として自然で読みやすい文章に整理
-5. 文字起こしの不完全な部分は適切に補完
-
-**出力構造:**
-# 会議議事録
-## 概要
-## 参加者
-## 主要議題と討議内容
-## 決定事項
-## アクションアイテム
-## その他・備考`
-  }
 }
 
 export const geminiService = new GeminiService()

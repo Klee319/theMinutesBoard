@@ -14,6 +14,7 @@ export interface Meeting {
   participants: string[]
   transcripts: Transcript[]
   minutes?: Minutes
+  callEndReason?: string
 }
 
 export interface Minutes {
@@ -67,6 +68,8 @@ export interface RateLimitStatus {
 export interface ChromeMessage {
   type: MessageType
   payload?: any
+  reason?: string
+  timestamp?: string
 }
 
 export type MessageType = 
@@ -81,9 +84,54 @@ export type MessageType =
   | 'OPEN_VIEWER_TAB'
   | 'FOCUS_TAB'
   | 'VIEWER_TAB_OPENED'
+  | 'AI_REQUEST'
+  | 'AI_RESPONSE'
+  | 'OPEN_ASSISTANT_TAB'
+  | 'KEYWORD_DETECTED'
+  | 'REALTIME_TRANSCRIPT'
+  | 'CALL_ENDED'
+  | 'MINUTES_UPDATE'
 
 export interface StorageData {
   meetings: Meeting[]
   settings: UserSettings
   currentMeetingId?: string
+}
+
+export interface AIResponse {
+  id: string
+  content: string
+  generatedAt: Date
+  requestType: 'general' | 'search' | 'minutes_edit'
+  context?: {
+    transcripts?: Transcript[]
+    minutesContent?: string
+  }
+}
+
+export interface AIAssistantSession {
+  id: string
+  meetingId?: string
+  messages: AIConversationMessage[]
+  createdAt: Date
+  lastActivity: Date
+}
+
+export interface AIConversationMessage {
+  id: string
+  type: 'user' | 'assistant'
+  content: string
+  timestamp: Date
+  context?: {
+    transcripts?: Transcript[]
+    minutesContent?: string
+  }
+}
+
+export interface KeywordDetection {
+  keyword: string
+  context: string
+  timestamp: Date
+  confidence: number
+  extractedRequest?: string
 }

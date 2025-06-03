@@ -11,6 +11,9 @@ class TranscriptCapture {
   private currentMinutes: any = null
   private viewerTabId: number | null = null
   private hasGeneratedMinutes = false
+  private callStatusObserver: MutationObserver | null = null
+  private isCallActive = true
+  private lastCallCheck = Date.now()
   
   constructor() {
     this.init()
@@ -20,6 +23,7 @@ class TranscriptCapture {
     this.injectUI()
     this.setupMessageListener()
     this.waitForCaptions()
+    this.setupCallStatusMonitoring()
   }
   
   private injectUI() {
@@ -47,10 +51,9 @@ class TranscriptCapture {
         </button>
       </div>
       <div id="minutes-content" class="minutes-content-area" style="display:none;">
-        <div class="minutes-toolbar">
-          <button id="minutes-regenerate" class="toolbar-btn">
-            <span>🔄</span> 完全再生成
-          </button>
+        <div id="minutes-loading" class="minutes-loading" style="display:none;">
+          <div class="spinner"></div>
+          <span class="loading-text">AIが処理中...</span>
         </div>
         <div id="minutes-text" class="minutes-text-display">
           議事録を生成中...
@@ -89,7 +92,6 @@ class TranscriptCapture {
     const toggleBtn = document.getElementById('minutes-toggle-recording')
     const generateBtn = document.getElementById('minutes-generate')
     const openTabBtn = document.getElementById('minutes-open-tab')
-    const regenerateBtn = document.getElementById('minutes-regenerate')
     
     toggleBtn?.addEventListener('click', () => {
       if (this.isRecording) {
@@ -105,10 +107,6 @@ class TranscriptCapture {
     
     openTabBtn?.addEventListener('click', () => {
       this.openInNewTab()
-    })
-    
-    regenerateBtn?.addEventListener('click', () => {
-      this.regenerateMinutes()
     })
   }
   
@@ -211,6 +209,11 @@ class TranscriptCapture {
           sendResponse({ success: true })
           break
           
+        case 'MINUTES_UPDATE':
+          this.showMinutesPreview(message.payload)
+          sendResponse({ success: true })
+          break
+          
         case 'VIEWER_TAB_OPENED':
           this.viewerTabId = message.payload.tabId
           sendResponse({ success: true })
@@ -241,7 +244,7 @@ class TranscriptCapture {
         const element = document.querySelector(selector)
         if (element) {
           // 字幕コンテナが実際に表示されているか確認
-          const isVisible = element.offsetParent !== null
+          const isVisible = (element as HTMLElement).offsetParent !== null
           if (isVisible) {
             this.captionsContainer = element
             captionsFound = true
@@ -269,7 +272,7 @@ class TranscriptCapture {
     
     for (const selector of captionSelectors) {
       const element = document.querySelector(selector)
-      if (element && element.offsetParent !== null) {
+      if (element && (element as HTMLElement).offsetParent !== null) {
         this.captionsContainer = element
         console.log('Captions container found with selector:', selector)
         return true
@@ -359,6 +362,130 @@ class TranscriptCapture {
     
     console.log('Recording stopped')
   }
+
+  private setupCallStatusMonitoring() {
+    // URLの変更を監視（ページ離脱検知）
+    const currentUrl = window.location.href
+    console.log('Setting up call status monitoring for URL:', currentUrl)
+    
+    // ページが会議画面から離脱したか監視
+    const checkUrl = () => {
+      const newUrl = window.location.href
+      if (!newUrl.includes('meet.google.com') || 
+          (currentUrl.includes('/') && !newUrl.includes(currentUrl.split('/').pop() || ''))) {
+        console.log('URL changed, call likely ended:', newUrl)
+        this.handleCallEnded('URL change detected')
+      }
+    }
+    
+    // URLの変更を定期的にチェック
+    setInterval(checkUrl, 2000)
+    
+    // ページ離脱時のイベント監視
+    window.addEventListener('beforeunload', () => {
+      this.handleCallEnded('Page unload')
+    })
+    
+    // 通話終了ボタンの監視
+    this.monitorCallEndButton()
+    
+    // 会議画面の要素消失を監視
+    this.monitorMeetingElements()
+  }
+
+  private monitorCallEndButton() {
+    // Google Meetの通話終了ボタンを監視
+    const callEndSelectors = [
+      '[data-tooltip*="通話を終了"]',
+      '[aria-label*="通話を終了"]',
+      '[aria-label*="Leave call"]',
+      '[aria-label*="End call"]',
+      '[data-tooltip*="Leave call"]',
+      '[data-tooltip*="End call"]',
+      'button[aria-label*="離"]',
+      'button[data-tooltip*="離"]'
+    ]
+    
+    const checkCallEndButton = () => {
+      for (const selector of callEndSelectors) {
+        const button = document.querySelector(selector) as HTMLButtonElement
+        if (button) {
+          // まだイベントリスナーが追加されていない場合のみ追加
+          if (!button.dataset.callEndListenerAdded) {
+            button.dataset.callEndListenerAdded = 'true'
+            button.addEventListener('click', () => {
+              console.log('Call end button clicked')
+              // 少し遅延を入れて実際に通話が終了するのを待つ
+              setTimeout(() => {
+                this.handleCallEnded('Call end button clicked')
+              }, 1000)
+            })
+            console.log('Added call end button listener to:', selector)
+          }
+        }
+      }
+    }
+    
+    // 定期的にボタンをチェック（動的に追加される可能性があるため）
+    setInterval(checkCallEndButton, 3000)
+    checkCallEndButton() // 初回実行
+  }
+
+  private monitorMeetingElements() {
+    // 会議画面の重要な要素が消失したかを監視
+    const criticalSelectors = [
+      '[data-self-name]', // 自分の名前表示
+      '[data-allocation-index]', // 参加者表示エリア
+      '[role="main"]', // メイン会議エリア
+      '[jsname="VOlAQe"]' // Google Meet特有の会議エリア
+    ]
+    
+    const checkMeetingElements = () => {
+      let elementsFound = 0
+      
+      for (const selector of criticalSelectors) {
+        if (document.querySelector(selector)) {
+          elementsFound++
+        }
+      }
+      
+      // 重要な要素が大幅に減った場合は通話終了と判断
+      if (elementsFound === 0 && this.isCallActive) {
+        console.log('Critical meeting elements disappeared')
+        this.handleCallEnded('Meeting elements disappeared')
+      }
+    }
+    
+    // 定期的にチェック
+    setInterval(checkMeetingElements, 5000)
+  }
+
+  private handleCallEnded(reason: string) {
+    if (!this.isCallActive) return // 既に処理済み
+    
+    console.log('Call ended detected:', reason)
+    this.isCallActive = false
+    
+    // 記録中の場合は自動停止
+    if (this.isRecording) {
+      console.log('Auto-stopping recording due to call end')
+      this.stopRecording()
+      this.showNotification('通話が終了したため、記録を自動停止しました', 'info')
+      
+      // バックグラウンドにも通知
+      chrome.runtime.sendMessage({ 
+        type: 'CALL_ENDED',
+        reason: reason,
+        timestamp: new Date().toISOString()
+      })
+    }
+    
+    // オブザーバーのクリーンアップ
+    if (this.callStatusObserver) {
+      this.callStatusObserver.disconnect()
+      this.callStatusObserver = null
+    }
+  }
   
   private processCaptions() {
     if (!this.captionsContainer) return
@@ -407,6 +534,7 @@ class TranscriptCapture {
             content: allText
           }
         })
+        
         console.log(`[Unknown]: ${allText}`)
       }
       return
@@ -546,18 +674,22 @@ class TranscriptCapture {
   
   private generateMinutes() {
     this.showNotification('議事録を生成中...', 'info')
+    this.showLoadingState(true)
     
     chrome.runtime.sendMessage({ type: 'GENERATE_MINUTES' }, (response) => {
       if (chrome.runtime.lastError) {
         console.error('Extension context error:', chrome.runtime.lastError)
         this.showNotification('エラー: 拡張機能を再読み込みしてください', 'error')
+        this.showLoadingState(false)
         return
       }
       
       if (response.success) {
         this.showNotification('議事録の生成を開始しました')
+        // 成功時もローディング状態は継続（MINUTES_GENERATEDで解除）
       } else {
         this.showNotification('エラー: ' + response.error, 'error')
+        this.showLoadingState(false)
       }
     })
   }
@@ -565,6 +697,9 @@ class TranscriptCapture {
   private showMinutesPreview(minutes: any) {
     this.currentMinutes = minutes
     this.hasGeneratedMinutes = true
+    
+    // ローディング状態を解除
+    this.showLoadingState(false)
     
     // ボタンテキストを更新
     this.updateGenerateButtonText()
@@ -647,21 +782,18 @@ class TranscriptCapture {
     })
   }
   
-  private regenerateMinutes() {
-    if (confirm('議事録を完全に再生成しますか？')) {
-      this.showNotification('議事録を再生成中...', 'info')
-      
-      chrome.runtime.sendMessage({ type: 'GENERATE_MINUTES' }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('Extension context error:', chrome.runtime.lastError)
-          this.showNotification('エラー: 拡張機能を再読み込みしてください', 'error')
-          return
-        }
-        
-        if (!response?.success) {
-          this.showNotification('エラー: ' + (response?.error || '再生成に失敗しました'), 'error')
-        }
-      })
+  private showLoadingState(show: boolean) {
+    const loadingDiv = document.getElementById('minutes-loading')
+    const minutesText = document.getElementById('minutes-text')
+    
+    if (loadingDiv) {
+      loadingDiv.style.display = show ? 'flex' : 'none'
+    }
+    
+    if (minutesText && show) {
+      minutesText.style.opacity = '0.5'
+    } else if (minutesText) {
+      minutesText.style.opacity = '1'
     }
   }
   
@@ -747,6 +879,8 @@ class TranscriptCapture {
       setTimeout(() => notification.remove(), 300)
     }, 3000)
   }
+
+
 }
 
 new TranscriptCapture()

@@ -1,4 +1,5 @@
 import { Transcript, Minutes, UserSettings } from '@/types'
+import { PromptLoader } from '@/services/prompt-loader'
 
 export abstract class BaseAIService {
   protected apiKey: string
@@ -19,6 +20,9 @@ export abstract class BaseAIService {
     reset: Date
     limit: number
   }>
+
+  // AIアシスタント用の汎用コンテンツ生成メソッド
+  abstract generateContent(prompt: string, modelId?: string): Promise<string>
 
   protected calculateDuration(transcripts: Transcript[]): number {
     if (transcripts.length === 0) return 0
@@ -92,5 +96,32 @@ export abstract class BaseAIService {
 ## 決定事項
 ## アクションアイテム
 ## その他・備考`
+  }
+
+  // プロンプトファイルから議事録生成プロンプトを取得（優先度高）
+  protected async getEnhancedPrompt(settings?: UserSettings): Promise<string> {
+    const defaultPrompt = this.getDefaultPrompt()
+    
+    // 優先順位: 1. プロンプトファイル > 2. ユーザー設定テンプレート > 3. デフォルト
+    try {
+      // まずプロンプトファイルを試行
+      const filePrompt = await PromptLoader.getMinutesGenerationPrompt(defaultPrompt)
+      
+      // プロンプトファイルがデフォルトと異なる場合は使用
+      if (filePrompt !== defaultPrompt) {
+        return filePrompt
+      }
+      
+      // プロンプトファイルが利用できない場合、ユーザー設定を使用
+      if (settings?.promptTemplate && settings.promptTemplate.trim()) {
+        return settings.promptTemplate
+      }
+      
+      // 最後の手段としてデフォルトを使用
+      return defaultPrompt
+    } catch (error) {
+      console.warn('Failed to load enhanced prompt, using user settings or default', error)
+      return settings?.promptTemplate || defaultPrompt
+    }
   }
 }

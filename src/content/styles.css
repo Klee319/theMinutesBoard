@@ -184,6 +184,36 @@
   }
 }
 
+/* ローディング表示 */
+.minutes-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+  color: #3b82f6;
+  font-size: 14px;
+}
+
+.minutes-loading .spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e0e7ff;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.minutes-loading .loading-text {
+  font-weight: 500;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* 議事録プレビューモーダル */
 .minutes-preview-modal {
   position: fixed;

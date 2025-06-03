@@ -8,7 +8,7 @@ export class OpenRouterService extends BaseAIService {
     transcripts: Transcript[], 
     settings: UserSettings
   ): Promise<Minutes> {
-    const enhancedPrompt = this.createEnhancedPrompt(transcripts, settings)
+    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings)
     
     try {
       const response = await fetch(`${this.baseURL}/chat/completions`, {
@@ -16,7 +16,7 @@ export class OpenRouterService extends BaseAIService {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://theminutesboard.dev',
+          'HTTP-Referer': 'https://localhost:3000/',
           'X-Title': 'theMinutesBoard'
         },
         body: JSON.stringify({
@@ -33,7 +33,13 @@ export class OpenRouterService extends BaseAIService {
       })
 
       if (!response.ok) {
-        throw new Error(`OpenRouter API error: ${response.statusText}`)
+        const errorData = await response.text()
+        console.error('OpenRouter API error details:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        })
+        throw new Error(`OpenRouter API error: ${response.status} ${response.statusText} - ${errorData}`)
       }
 
       const data = await response.json()
@@ -99,9 +105,50 @@ export class OpenRouterService extends BaseAIService {
     }
   }
 
-  private createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): string {
+  async generateContent(prompt: string, modelId?: string): Promise<string> {
+    try {
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://localhost:3000/',
+          'X-Title': 'theMinutesBoard'
+        },
+        body: JSON.stringify({
+          model: modelId || 'anthropic/claude-3.5-haiku',
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_tokens: 2000,
+          temperature: 0.7
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.text()
+        console.error('OpenRouter API error details:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        })
+        throw new Error(`OpenRouter API error: ${response.status} ${response.statusText} - ${errorData}`)
+      }
+
+      const data = await response.json()
+      return data.choices[0]?.message?.content || ''
+    } catch (error) {
+      console.error('Failed to generate content with OpenRouter:', error)
+      throw new Error('コンテンツの生成に失敗しました')
+    }
+  }
+
+  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): Promise<string> {
     const formattedTranscript = this.formatTranscriptsEnhanced(transcripts)
-    const basePrompt = settings.promptTemplate || this.getDefaultPrompt()
+    const basePrompt = await this.getEnhancedPrompt(settings)
     
     return `${basePrompt}
 
