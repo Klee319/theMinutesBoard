@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "theMinutesBoard",
+  "version": "1.0.0",
+  "description": "Google Meet の会議内容を自動的に記録し、Gemini AI を使用してリアルタイムで議事録を生成する Chrome 拡張機能",
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*"
+  ],
+  "options_page": "src/options/options.html",
+  "web_accessible_resources": [
+    {
+      "resources": ["content.css"],
+      "matches": ["https://meet.google.com/*"]
+    }
+  ]
+}
