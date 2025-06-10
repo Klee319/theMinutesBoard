@@ -23,7 +23,8 @@ export class GeminiService extends BaseAIService {
   
   async generateMinutes(
     transcripts: Transcript[], 
-    settings: UserSettings
+    settings: UserSettings,
+    meetingInfo?: { startTime?: Date; endTime?: Date }
   ): Promise<Minutes> {
     const modelId = settings.selectedModel || 'gemini-1.5-flash'
     
@@ -36,7 +37,7 @@ export class GeminiService extends BaseAIService {
     }
     
     // プロンプトファイルを優先的に使用した改善されたプロンプト
-    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings)
+    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings, meetingInfo)
     
     try {
       const result = await this.model.generateContent(enhancedPrompt)
@@ -109,9 +110,17 @@ export class GeminiService extends BaseAIService {
       .join('\n')
   }
 
-  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): Promise<string> {
+  private async createEnhancedPrompt(
+    transcripts: Transcript[], 
+    settings: UserSettings,
+    meetingInfo?: { startTime?: Date; endTime?: Date }
+  ): Promise<string> {
     const analysis = this.analyzeTranscriptQuality(transcripts)
-    const formattedTranscript = this.formatTranscriptsEnhanced(transcripts)
+    const formattedTranscript = super.formatTranscriptsEnhanced(
+      transcripts, 
+      meetingInfo?.startTime, 
+      meetingInfo?.endTime
+    )
     
     // プロンプトファイルを優先的に使用（設定のプロンプトテンプレートより優先）
     const basePrompt = await this.getEnhancedPrompt(settings)
@@ -121,7 +130,6 @@ export class GeminiService extends BaseAIService {
 **会議の詳細情報:**
 - 参加者: ${this.getUniqueParticipants(transcripts).join(', ')}
 - 発言数: ${transcripts.length}件
-- 会議時間: ${Math.floor(this.calculateDuration(transcripts) / 60)}分
 - 文字起こし品質: ${analysis.quality}
 
 **注意事項:**
@@ -192,44 +200,7 @@ ${formattedTranscript}
     return { quality, issues }
   }
 
-  protected formatTranscriptsEnhanced(transcripts: Transcript[]): string {
-    const sortedTranscripts = transcripts.sort((a, b) => 
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    )
-    
-    // 連続する同一話者の発言を統合
-    const consolidatedTranscripts: Transcript[] = []
-    let currentTranscript: Transcript | null = null
-    
-    sortedTranscripts.forEach(transcript => {
-      if (currentTranscript && 
-          currentTranscript.speaker === transcript.speaker &&
-          new Date(transcript.timestamp).getTime() - new Date(currentTranscript.timestamp).getTime() < 30000) {
-        // 30秒以内の同一話者の発言は統合
-        currentTranscript.content += ' ' + transcript.content
-      } else {
-        if (currentTranscript) {
-          consolidatedTranscripts.push(currentTranscript)
-        }
-        currentTranscript = { ...transcript }
-      }
-    })
-    
-    if (currentTranscript) {
-      consolidatedTranscripts.push(currentTranscript)
-    }
-    
-    return consolidatedTranscripts
-      .map(t => {
-        const time = new Date(t.timestamp).toLocaleTimeString('ja-JP', { 
-          hour: '2-digit', 
-          minute: '2-digit',
-          second: '2-digit'
-        })
-        return `[${time}] **${t.speaker}**: ${t.content}`
-      })
-      .join('\n\n')
-  }
+  // この関数は削除（base.tsのformatTranscriptsEnhancedを使用）
 
 }
 

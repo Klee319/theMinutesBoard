@@ -88,7 +88,8 @@ function App() {
     autoGenerate: false,
     generateInterval: 5,
     exportFormat: 'markdown',
-    theme: 'light'
+    theme: 'light',
+    userName: '' // ユーザー名を追加
   })
   const [saved, setSaved] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
@@ -112,15 +113,34 @@ function App() {
   }, [settings.aiProvider])
   
   const loadSettings = () => {
-    chrome.storage.local.get(['settings'], (result) => {
-      if (result.settings) {
-        setSettings(result.settings)
-        // APIキーがある場合は自動的に検証
-        if (result.settings.apiKey) {
-          validateApiKey(result.settings.apiKey)
+    // localとsyncの両方から設定を読み込む
+    chrome.storage.local.get(['settings'], (localResult) => {
+      chrome.storage.sync.get(['settings'], (syncResult) => {
+        // sync storageの設定を優先（ユーザー名とAPIキー）
+        const mergedSettings = {
+          ...(localResult.settings || {}),
+          ...(syncResult.settings || {})
         }
-      }
+        if (Object.keys(mergedSettings).length > 0) {
+          setSettings(mergedSettings as UserSettings)
+          // APIキーがある場合は自動的に検証
+          const apiKey = getCurrentApiKeyFromSettings(mergedSettings)
+          if (apiKey) {
+            validateApiKey(apiKey)
+          }
+        }
+      })
     })
+  }
+  
+  const getCurrentApiKeyFromSettings = (settings: any) => {
+    switch (settings.aiProvider) {
+      case 'gemini': return settings.apiKey
+      case 'openai': return settings.openaiApiKey
+      case 'claude': return settings.claudeApiKey
+      case 'openrouter': return settings.openrouterApiKey
+      default: return ''
+    }
   }
   
   const validateApiKey = async (apiKey: string) => {
@@ -190,9 +210,20 @@ function App() {
   }
 
   const handleSave = () => {
+    // localとsyncの両方に保存（syncにはユーザー名とAPIキーのみ）
+    const syncSettings = {
+      userName: settings.userName,
+      apiKey: settings.apiKey,
+      openaiApiKey: settings.openaiApiKey,
+      claudeApiKey: settings.claudeApiKey,
+      openrouterApiKey: settings.openrouterApiKey
+    }
+    
     chrome.storage.local.set({ settings }, () => {
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      chrome.storage.sync.set({ settings: syncSettings }, () => {
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2000)
+      })
     })
   }
   
@@ -209,7 +240,8 @@ function App() {
         autoGenerate: false,
         generateInterval: 5,
         exportFormat: 'markdown',
-        theme: 'light'
+        theme: 'light',
+        userName: '' // リセット時もユーザー名を含める
       })
       setApiKeyStatus('unchecked')
     }
@@ -476,6 +508,27 @@ function App() {
                   <option value="txt">テキスト (.txt)</option>
                   <option value="json">JSON</option>
                 </select>
+              </div>
+            </div>
+          </div>
+          
+          <div>
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">ユーザー設定</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  あなたの名前
+                </label>
+                <input
+                  type="text"
+                  value={settings.userName || ''}
+                  onChange={(e) => setSettings({ ...settings, userName: e.target.value })}
+                  className="input"
+                  placeholder="例: 田中太郎"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Google Meetで「あなた」と表示される部分がこの名前に置き換わります
+                </p>
               </div>
             </div>
           </div>

@@ -158,6 +158,9 @@ async function handleStopRecording(): Promise<void> {
     return
   }
   
+  const stoppedMeetingId = currentMeetingId
+  const stoppedTabId = recordingTabId
+  
   return new Promise((resolve, reject) => {
     chrome.storage.local.get(['meetings'], (result) => {
       if (chrome.runtime.lastError) {
@@ -166,7 +169,7 @@ async function handleStopRecording(): Promise<void> {
       }
       
       const meetings: Meeting[] = result.meetings || []
-      const meetingIndex = meetings.findIndex(m => m.id === currentMeetingId)
+      const meetingIndex = meetings.findIndex(m => m.id === stoppedMeetingId)
       
       if (meetingIndex !== -1) {
         meetings[meetingIndex].endTime = new Date()
@@ -174,17 +177,29 @@ async function handleStopRecording(): Promise<void> {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message))
           } else {
-            console.log('Recording stopped:', currentMeetingId)
+            console.log('Recording stopped:', stoppedMeetingId)
             currentMeetingId = null
             recordingTabId = null
-            chrome.storage.local.remove(['currentMeetingId'])
-            resolve()
+            chrome.storage.local.remove(['currentMeetingId'], () => {
+              // Content Scriptに停止完了を通知
+              if (stoppedTabId) {
+                chrome.tabs.sendMessage(stoppedTabId, {
+                  type: 'RECORDING_STOPPED',
+                  payload: { meetingId: stoppedMeetingId }
+                }).catch(() => {
+                  // エラーは無視（タブが閉じられている可能性）
+                })
+              }
+              resolve()
+            })
           }
         })
       } else {
         currentMeetingId = null
         recordingTabId = null
-        resolve()
+        chrome.storage.local.remove(['currentMeetingId'], () => {
+          resolve()
+        })
       }
     })
   })
@@ -238,15 +253,16 @@ async function handleGenerateMinutes(): Promise<any> {
     return { success: false, error: '議事録を生成中です。しばらくお待ちください。' }
   }
 
-  return new Promise(async (resolve) => {
+  try {
     isMinutesGenerating = true // 生成開始をマーク
     
-    chrome.storage.local.get(['meetings', 'settings'], async (result) => {
-      if (chrome.runtime.lastError) {
-        isMinutesGenerating = false
-        resolve({ success: false, error: chrome.runtime.lastError.message })
-        return
-      }
+    return await new Promise((resolve) => {
+      chrome.storage.local.get(['meetings', 'settings'], async (result) => {
+        if (chrome.runtime.lastError) {
+          isMinutesGenerating = false
+          resolve({ success: false, error: chrome.runtime.lastError.message })
+          return
+        }
       
       const meetings: Meeting[] = result.meetings || []
       const currentMeeting = meetings.find(m => m.id === currentMeetingId)
@@ -279,10 +295,14 @@ async function handleGenerateMinutes(): Promise<any> {
         // 選択されたAIサービスを作成
         const aiService = AIServiceFactory.createService(result.settings)
         
-        // 議事録を生成
+        // 議事録を生成（会議の時刻情報を含める）
         const minutes = await aiService.generateMinutes(
           currentMeeting.transcripts,
-          result.settings
+          result.settings,
+          {
+            startTime: currentMeeting.startTime,
+            endTime: currentMeeting.endTime || new Date()
+          }
         )
         
         // 生成された議事録を保存
@@ -320,7 +340,20 @@ async function handleGenerateMinutes(): Promise<any> {
         })
       }
     })
-  })
+  }) 
+  } catch (error) {
+    console.error('Unexpected error in handleGenerateMinutes:', error)
+    isMinutesGenerating = false
+    return { success: false, error: 'Unexpected error occurred' }
+  } finally {
+    // タイムアウト保護: 30秒後に必ずフラグをリセット
+    setTimeout(() => {
+      if (isMinutesGenerating) {
+        console.warn('Resetting isMinutesGenerating flag due to timeout')
+        isMinutesGenerating = false
+      }
+    }, 30000)
+  }
 }
 
 async function handleExportMinutes(format: string): Promise<any> {

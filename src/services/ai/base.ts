@@ -1,5 +1,4 @@
 import { Transcript, Minutes, UserSettings } from '@/types'
-import { PromptLoader } from '@/services/prompt-loader'
 
 export abstract class BaseAIService {
   protected apiKey: string
@@ -10,7 +9,8 @@ export abstract class BaseAIService {
 
   abstract generateMinutes(
     transcripts: Transcript[], 
-    settings: UserSettings
+    settings: UserSettings,
+    meetingInfo?: { startTime?: Date; endTime?: Date }
   ): Promise<Minutes>
 
   abstract validateApiKey(apiKey: string): Promise<boolean>
@@ -39,7 +39,7 @@ export abstract class BaseAIService {
     return Array.from(participants)
   }
 
-  protected formatTranscriptsEnhanced(transcripts: Transcript[]): string {
+  protected formatTranscriptsEnhanced(transcripts: Transcript[], startTime?: Date, endTime?: Date): string {
     const sortedTranscripts = transcripts.sort((a, b) => 
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     )
@@ -66,7 +66,26 @@ export abstract class BaseAIService {
       consolidatedTranscripts.push(currentTranscript)
     }
     
-    return consolidatedTranscripts
+    // 会議の時間情報を追加
+    let header = ''
+    if (startTime || endTime) {
+      header = '## 会議情報\n'
+      if (startTime) {
+        header += `- 開始時刻: ${startTime.toLocaleString('ja-JP')}\n`
+      }
+      if (endTime) {
+        header += `- 終了時刻: ${endTime.toLocaleString('ja-JP')}\n`
+        if (startTime) {
+          const duration = Math.floor((endTime.getTime() - startTime.getTime()) / 1000)
+          const hours = Math.floor(duration / 3600)
+          const minutes = Math.floor((duration % 3600) / 60)
+          header += `- 会議時間: ${hours > 0 ? `${hours}時間` : ''}${minutes}分\n`
+        }
+      }
+      header += '\n## 発言記録\n'
+    }
+    
+    const transcriptText = consolidatedTranscripts
       .map(t => {
         const time = new Date(t.timestamp).toLocaleTimeString('ja-JP', { 
           hour: '2-digit', 
@@ -76,6 +95,8 @@ export abstract class BaseAIService {
         return `[${time}] **${t.speaker}**: ${t.content}`
       })
       .join('\n\n')
+      
+    return header + transcriptText
   }
 
   protected getDefaultPrompt(): string {
@@ -98,30 +119,15 @@ export abstract class BaseAIService {
 ## その他・備考`
   }
 
-  // プロンプトファイルから議事録生成プロンプトを取得（優先度高）
+  // ユーザー設定のプロンプトを取得
   protected async getEnhancedPrompt(settings?: UserSettings): Promise<string> {
     const defaultPrompt = this.getDefaultPrompt()
     
-    // 優先順位: 1. プロンプトファイル > 2. ユーザー設定テンプレート > 3. デフォルト
-    try {
-      // まずプロンプトファイルを試行
-      const filePrompt = await PromptLoader.getMinutesGenerationPrompt(defaultPrompt)
-      
-      // プロンプトファイルがデフォルトと異なる場合は使用
-      if (filePrompt !== defaultPrompt) {
-        return filePrompt
-      }
-      
-      // プロンプトファイルが利用できない場合、ユーザー設定を使用
-      if (settings?.promptTemplate && settings.promptTemplate.trim()) {
-        return settings.promptTemplate
-      }
-      
-      // 最後の手段としてデフォルトを使用
-      return defaultPrompt
-    } catch (error) {
-      console.warn('Failed to load enhanced prompt, using user settings or default', error)
-      return settings?.promptTemplate || defaultPrompt
+    // ユーザー設定のプロンプトがあればそれを使用、なければデフォルト
+    if (settings?.promptTemplate && settings.promptTemplate.trim()) {
+      return settings.promptTemplate
     }
+    
+    return defaultPrompt
   }
 }

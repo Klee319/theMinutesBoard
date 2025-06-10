@@ -15,10 +15,6 @@ export default defineConfig({
         {
           src: 'public/*.png',
           dest: ''
-        },
-        {
-          src: 'src/prompts',
-          dest: 'src'
         }
       ]
     })

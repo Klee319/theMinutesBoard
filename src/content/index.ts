@@ -14,9 +14,19 @@ class TranscriptCapture {
   private callStatusObserver: MutationObserver | null = null
   private isCallActive = true
   private lastCallCheck = Date.now()
+  private currentUserName: string | null = null
   
   constructor() {
     this.init()
+    this.loadUserName()
+  }
+  
+  private async loadUserName() {
+    // Sync storageから利用者名を取得
+    const result = await chrome.storage.sync.get(['settings'])
+    if (result.settings?.userName) {
+      this.currentUserName = result.settings.userName
+    }
   }
   
   private init() {
@@ -24,6 +34,48 @@ class TranscriptCapture {
     this.setupMessageListener()
     this.waitForCaptions()
     this.setupCallStatusMonitoring()
+    this.checkExistingSession()
+  }
+  
+  private async checkExistingSession() {
+    // 既存のセッションがあるか確認
+    const result = await chrome.storage.local.get(['currentMeetingId'])
+    if (result.currentMeetingId) {
+      console.log('Restoring existing session:', result.currentMeetingId)
+      this.isRecording = true
+      this.updateRecordingUI(true)
+      
+      // Background scriptに現在のタブIDを通知
+      chrome.runtime.sendMessage({ 
+        type: 'RESTORE_SESSION',
+        payload: { tabId: chrome.runtime.id }
+      })
+    }
+  }
+  
+  private updateRecordingUI(recording: boolean) {
+    const toggleBtn = document.getElementById('minutes-toggle-recording')
+    const generateBtn = document.getElementById('minutes-generate')
+    
+    if (toggleBtn) {
+      if (recording) {
+        toggleBtn.classList.add('recording')
+        const btnText = toggleBtn.querySelector('.btn-text')
+        if (btnText) btnText.textContent = '記録停止'
+      } else {
+        toggleBtn.classList.remove('recording')
+        const btnText = toggleBtn.querySelector('.btn-text')
+        if (btnText) btnText.textContent = '記録開始'
+      }
+    }
+    
+    if (generateBtn) {
+      if (recording) {
+        generateBtn.removeAttribute('disabled')
+      } else {
+        generateBtn.setAttribute('disabled', 'true')
+      }
+    }
   }
   
   private injectUI() {
@@ -176,6 +228,17 @@ class TranscriptCapture {
   }
   
   private setupMessageListener() {
+    // 設定変更を監視
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+      if (namespace === 'sync' && changes.settings) {
+        const newSettings = changes.settings.newValue
+        if (newSettings?.userName) {
+          this.currentUserName = newSettings.userName
+          console.log('Updated user name:', this.currentUserName)
+        }
+      }
+    })
+    
     chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendResponse) => {
       console.log('Content script received message:', message.type)
       
@@ -216,6 +279,14 @@ class TranscriptCapture {
           
         case 'VIEWER_TAB_OPENED':
           this.viewerTabId = message.payload.tabId
+          sendResponse({ success: true })
+          break
+          
+        case 'RECORDING_STOPPED':
+          // 停止完了の通知を受け取った場合
+          this.isRecording = false
+          this.updateRecordingUI(false)
+          this.showNotification('記録を停止しました', 'info')
           sendResponse({ success: true })
           break
           
@@ -306,18 +377,7 @@ class TranscriptCapture {
       }
     })
     
-    const toggleBtn = document.getElementById('minutes-toggle-recording')
-    const generateBtn = document.getElementById('minutes-generate')
-    
-    if (toggleBtn) {
-      toggleBtn.classList.add('recording')
-      const btnText = toggleBtn.querySelector('.btn-text')
-      if (btnText) btnText.textContent = '記録停止'
-    }
-    
-    if (generateBtn) {
-      generateBtn.removeAttribute('disabled')
-    }
+    this.updateRecordingUI(true)
     
     this.observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
@@ -342,18 +402,7 @@ class TranscriptCapture {
     this.isRecording = false
     chrome.runtime.sendMessage({ type: 'STOP_RECORDING' })
     
-    const toggleBtn = document.getElementById('minutes-toggle-recording')
-    const generateBtn = document.getElementById('minutes-generate')
-    
-    if (toggleBtn) {
-      toggleBtn.classList.remove('recording')
-      const btnText = toggleBtn.querySelector('.btn-text')
-      if (btnText) btnText.textContent = '記録開始'
-    }
-    
-    if (generateBtn) {
-      generateBtn.setAttribute('disabled', 'true')
-    }
+    this.updateRecordingUI(false)
     
     if (this.observer) {
       this.observer.disconnect()
@@ -621,19 +670,25 @@ class TranscriptCapture {
             if (possibleSpeaker && possibleText) {
               console.log(`Parsed from full text - Speaker: ${possibleSpeaker}, Text: ${possibleText}`)
               
+              // 「あなた」を利用者名に置換
+              let finalSpeaker = possibleSpeaker
+              if ((possibleSpeaker === 'あなた' || possibleSpeaker === 'You' || possibleSpeaker === '自分') && this.currentUserName) {
+                finalSpeaker = this.currentUserName
+              }
+              
               if (possibleText !== this.lastCaption && possibleText.length > 2) {
                 this.lastCaption = possibleText
-                this.currentSpeaker = possibleSpeaker
+                this.currentSpeaker = finalSpeaker
                 
                 chrome.runtime.sendMessage({
                   type: 'TRANSCRIPT_UPDATE',
                   payload: {
-                    speaker: possibleSpeaker,
+                    speaker: finalSpeaker,
                     content: possibleText
                   }
                 })
                 
-                console.log(`[${possibleSpeaker}]: ${possibleText}`)
+                console.log(`[${finalSpeaker}]: ${possibleText}`)
               }
               return
             }
@@ -646,8 +701,13 @@ class TranscriptCapture {
         textElement = element
       }
       
-      const speaker = speakerElement?.textContent?.trim() || 'Unknown'
+      let speaker = speakerElement?.textContent?.trim() || 'Unknown'
       const text = textElement?.textContent?.trim() || ''
+      
+      // 「あなた」または「You」を利用者名に置換
+      if ((speaker === 'あなた' || speaker === 'You' || speaker === '自分') && this.currentUserName) {
+        speaker = this.currentUserName
+      }
       
       // スピーカー名がテキストに含まれている場合は除去
       let cleanText = text
@@ -703,6 +763,12 @@ class TranscriptCapture {
     
     // ボタンテキストを更新
     this.updateGenerateButtonText()
+    
+    // 生成ボタンを再度有効化
+    const generateBtn = document.getElementById('minutes-generate')
+    if (generateBtn) {
+      generateBtn.removeAttribute('disabled')
+    }
     
     // 初回生成時は拡張表示に切り替え
     if (!this.isMinutesExpanded) {

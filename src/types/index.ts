@@ -42,6 +42,7 @@ export interface UserSettings {
   generateInterval: number
   exportFormat: ExportFormat
   theme: 'light' | 'dark' | 'auto'
+  userName?: string // 拡張機能利用者名を追加
 }
 
 export type AIProvider = 'gemini' | 'openai' | 'claude' | 'openrouter'
