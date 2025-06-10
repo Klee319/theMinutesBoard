@@ -238,34 +238,47 @@ function App() {
   }
 
   const extractMeetingTopic = (content: string): string => {
-    // 議題を抽出する（いくつかのパターンを試す）
-    const patterns = [
-      /議題[:：]\s*(.+?)[\n\r]/,
-      /主な議題[:：]\s*(.+?)[\n\r]/,
-      /主要議題[:：]\s*(.+?)[\n\r]/,
-      /## 議題\s*\n(.+?)[\n\r]/,
-      /## 主な議題\s*\n(.+?)[\n\r]/,
-      /## 概要\s*\n(.+?)[\n\r]/,
-      /^#+ .+?議事録\s*\n+(.+?)[\n\r]/m
+    // 会議の目的を優先的に抽出
+    const purposePatterns = [
+      /会議の目的[:：]\s*(.+?)[\n\r]/,
+      /\*\*会議の目的\*\*[:：]\s*(.+?)[\n\r]/,
+      /目的[:：]\s*(.+?)[\n\r]/
     ]
     
-    for (const pattern of patterns) {
+    for (const pattern of purposePatterns) {
       const match = content.match(pattern)
       if (match && match[1]) {
-        const topic = match[1].trim()
-        // 最大20文字に制限
-        return topic.length > 20 ? topic.substring(0, 20) + '...' : topic
+        const purpose = match[1].trim()
+        return purpose.length > 30 ? purpose.substring(0, 30) + '...' : purpose
       }
     }
     
-    // 議題が見つからない場合は、最初の内容を表示
-    const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'))
-    if (lines.length > 0) {
-      const firstContent = lines[0].trim()
-      return firstContent.length > 20 ? firstContent.substring(0, 20) + '...' : firstContent
+    // 次に主要議題を探す
+    const topicPatterns = [
+      /## 主要議題と討議内容\s*\n+### \d+\.\s*(.+?)[\n\r]/,
+      /### \d+\.\s*(.+?)[\n\r]/,
+      /議題[:：]\s*(.+?)[\n\r]/,
+      /主な議題[:：]\s*(.+?)[\n\r]/
+    ]
+    
+    for (const pattern of topicPatterns) {
+      const match = content.match(pattern)
+      if (match && match[1]) {
+        const topic = match[1].trim()
+        return topic.length > 30 ? topic.substring(0, 30) + '...' : topic
+      }
     }
     
-    return '議題なし'
+    // 決定事項から抽出
+    const decisionPattern = /## 決定事項\s*\n+[\-\*]\s*\*\*(.+?)\*\*/
+    const decisionMatch = content.match(decisionPattern)
+    if (decisionMatch && decisionMatch[1]) {
+      const decision = decisionMatch[1].trim()
+      return decision.length > 30 ? decision.substring(0, 30) + '...' : decision
+    }
+    
+    // それでも見つからない場合は「内容なし」
+    return '議題情報なし'
   }
 
   const displayMeeting = selectedMeeting || currentMeeting
@@ -474,27 +487,15 @@ function App() {
                             : 'hover:bg-gray-50'
                         }`}
                       >
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900">
-                              {meeting.title || 'Unknown date'}
-                            </p>
-                            {meeting.transcripts && meeting.transcripts.length > 0 && (
-                              <p className="text-xs text-gray-600 mt-1">
-                                発言数: {meeting.transcripts.length}
-                              </p>
-                            )}
-                            {meeting.minutes && (
-                              <p className="text-xs text-gray-700 truncate mt-1 font-medium" title={extractMeetingTopic(meeting.minutes.content)}>
-                                {extractMeetingTopic(meeting.minutes.content)}
-                              </p>
-                            )}
-                          </div>
+                        <div>
                           {meeting.minutes && (
-                            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded ml-2 flex-shrink-0">
-                              議事録
-                            </span>
+                            <p className="text-sm font-medium text-gray-900 mb-1" title={extractMeetingTopic(meeting.minutes.content)}>
+                              {extractMeetingTopic(meeting.minutes.content)}
+                            </p>
                           )}
+                          <p className="text-xs text-gray-600">
+                            {meeting.title || 'Unknown date'}
+                          </p>
                         </div>
                       </div>
                     )})}
