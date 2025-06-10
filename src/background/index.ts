@@ -302,56 +302,70 @@ async function handleGenerateMinutes(): Promise<any> {
     isMinutesGenerating = true // 生成開始をマーク
     
     return await new Promise((resolve) => {
-      chrome.storage.local.get(['meetings', 'settings'], async (result) => {
+      chrome.storage.local.get(['meetings', 'settings'], async (localResult) => {
         if (chrome.runtime.lastError) {
           isMinutesGenerating = false
           resolve({ success: false, error: chrome.runtime.lastError.message })
           return
         }
         
-        // データ整合性チェック
-        if (!result.meetings || !Array.isArray(result.meetings)) {
-          console.error('Invalid meetings data:', result.meetings)
-          isMinutesGenerating = false
-          resolve({ success: false, error: 'ストレージデータが破損しています' })
-          return
-        }
-      
-      const meetings: Meeting[] = result.meetings || []
-      const currentMeeting = meetings.find(m => m.id === currentMeetingId)
-      
-      if (!currentMeeting) {
-        isMinutesGenerating = false
-        resolve({ success: false, error: '記録中の会議がありません' })
-        return
-      }
-      
-      if (currentMeeting.transcripts.length === 0) {
-        isMinutesGenerating = false
-        resolve({ success: false, error: 'まだ発言が記録されていません' })
-        return
-      }
-      
-      if (!result.settings) {
-        resolve({ success: false, error: 'AI設定が設定されていません' })
-        return
-      }
-
-      // AIプロバイダーとAPIキーの検証
-      if (!AIServiceFactory.validateProviderSettings(result.settings)) {
-        const provider = result.settings.aiProvider || 'gemini'
-        resolve({ success: false, error: `${provider} APIキーが設定されていません` })
-        return
-      }
-      
-      try {
-        // 選択されたAIサービスを作成
-        const aiService = AIServiceFactory.createService(result.settings)
+        // sync storageからも設定を読み込む
+        chrome.storage.sync.get(['settings'], async (syncResult) => {
+          if (chrome.runtime.lastError) {
+            console.warn('Failed to load sync settings:', chrome.runtime.lastError)
+          }
+          
+          // localとsyncの設定をマージ（sync優先）
+          const mergedSettings = {
+            ...(localResult.settings || {}),
+            ...(syncResult.settings || {})
+          }
+          
+          // データ整合性チェック
+          if (!localResult.meetings || !Array.isArray(localResult.meetings)) {
+            console.error('Invalid meetings data:', localResult.meetings)
+            isMinutesGenerating = false
+            resolve({ success: false, error: 'ストレージデータが破損しています' })
+            return
+          }
         
-        // 議事録を生成（会議の時刻情報を含める）
-        const minutes = await aiService.generateMinutes(
-          currentMeeting.transcripts,
-          result.settings,
+          const meetings: Meeting[] = localResult.meetings || []
+          const currentMeeting = meetings.find(m => m.id === currentMeetingId)
+          
+          if (!currentMeeting) {
+            isMinutesGenerating = false
+            resolve({ success: false, error: '記録中の会議がありません' })
+            return
+          }
+          
+          if (currentMeeting.transcripts.length === 0) {
+            isMinutesGenerating = false
+            resolve({ success: false, error: 'まだ発言が記録されていません' })
+            return
+          }
+          
+          if (!mergedSettings || Object.keys(mergedSettings).length === 0) {
+            isMinutesGenerating = false
+            resolve({ success: false, error: 'AI設定が設定されていません' })
+            return
+          }
+
+          // AIプロバイダーとAPIキーの検証
+          if (!AIServiceFactory.validateProviderSettings(mergedSettings)) {
+            const provider = mergedSettings.aiProvider || 'gemini'
+            isMinutesGenerating = false
+            resolve({ success: false, error: `${provider} APIキーが設定されていません` })
+            return
+          }
+          
+          try {
+            // 選択されたAIサービスを作成
+            const aiService = AIServiceFactory.createService(mergedSettings)
+        
+            // 議事録を生成（会議の時刻情報を含める）
+            const minutes = await aiService.generateMinutes(
+              currentMeeting.transcripts,
+              mergedSettings,
           {
             startTime: new Date(currentMeeting.startTime),
             endTime: currentMeeting.endTime ? new Date(currentMeeting.endTime) : new Date()
@@ -384,15 +398,16 @@ async function handleGenerateMinutes(): Promise<any> {
             }
           })
         }
-      } catch (error: any) {
-        console.error('Error generating minutes:', error)
-        isMinutesGenerating = false // エラー時も生成完了をマーク
-        resolve({ 
-          success: false, 
-          error: error.message || '議事録の生成中にエラーが発生しました' 
+          } catch (error: any) {
+            console.error('Error generating minutes:', error)
+            isMinutesGenerating = false // エラー時も生成完了をマーク
+            resolve({ 
+              success: false, 
+              error: error.message || '議事録の生成中にエラーが発生しました' 
+            })
+          }
         })
-      }
-    })
+      })
   }) 
   } catch (error) {
     console.error('Unexpected error in handleGenerateMinutes:', error)

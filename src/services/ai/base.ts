@@ -119,6 +119,14 @@ export abstract class BaseAIService {
     // システムプロンプトを必ず含める
     let combinedPrompt = this.getSystemPrompt()
     
+    // ユーザー名のプレースホルダーを置換
+    if (settings?.userName) {
+      combinedPrompt = combinedPrompt.replace(/\{\{userName\}\}/g, settings.userName)
+    } else {
+      // ユーザー名が設定されていない場合は「不明な参加者」とする
+      combinedPrompt = combinedPrompt.replace(/\{\{userName\}\}/g, '不明な参加者')
+    }
+    
     // カスタムプロンプトがある場合は追加
     if (settings?.promptTemplate && settings.promptTemplate.trim()) {
       combinedPrompt += '\n\n## 追加のカスタム指示\n\n' + settings.promptTemplate
