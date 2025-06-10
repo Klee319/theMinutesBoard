@@ -42,8 +42,8 @@
     {
       "resources": [
         "content.css",
-        "src/prompts/minutes-generation.md",
-        "src/prompts/ai-assistant.md"
+        "system-prompts/minutes-generation.md",
+        "system-prompts/nextsteps-generation.md"
       ],
       "matches": ["https://meet.google.com/*"]
     }

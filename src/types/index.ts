@@ -92,6 +92,9 @@ export type MessageType =
   | 'REALTIME_TRANSCRIPT'
   | 'CALL_ENDED'
   | 'MINUTES_UPDATE'
+  | 'PARTICIPANT_UPDATE'
+  | 'RECORDING_STOPPED'
+  | 'RESTORE_SESSION'
 
 export interface StorageData {
   meetings: Meeting[]

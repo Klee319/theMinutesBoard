@@ -6,9 +6,10 @@ export class ClaudeService extends BaseAIService {
 
   async generateMinutes(
     transcripts: Transcript[], 
-    settings: UserSettings
+    settings: UserSettings,
+    meetingInfo?: { startTime?: Date; endTime?: Date }
   ): Promise<Minutes> {
-    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings)
+    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings, meetingInfo)
     
     try {
       const response = await fetch(`${this.baseURL}/messages`, {
@@ -124,8 +125,8 @@ export class ClaudeService extends BaseAIService {
     }
   }
 
-  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings): Promise<string> {
-    const formattedTranscript = this.formatTranscriptsEnhanced(transcripts)
+  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings, meetingInfo?: { startTime?: Date; endTime?: Date }): Promise<string> {
+    const formattedTranscript = this.formatTranscriptsEnhanced(transcripts, meetingInfo?.startTime, meetingInfo?.endTime)
     const basePrompt = await this.getEnhancedPrompt(settings)
     
     return `${basePrompt}

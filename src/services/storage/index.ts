@@ -1,6 +1,9 @@
 import { Meeting, Minutes, StorageData, ExportFormat } from '@/types'
 
 export class StorageService {
+  private readonly MAX_MEETINGS = 100 // 最大保存会議数
+  private readonly MAX_STORAGE_BYTES = 4 * 1024 * 1024 // 4MB制限
+  
   async saveMeeting(meeting: Meeting): Promise<void> {
     const { meetings = [] } = await chrome.storage.local.get(['meetings'])
     const existingIndex = meetings.findIndex((m: Meeting) => m.id === meeting.id)
@@ -9,6 +12,20 @@ export class StorageService {
       meetings[existingIndex] = meeting
     } else {
       meetings.push(meeting)
+    }
+    
+    // ストレージサイズをチェック
+    const bytesInUse = await chrome.storage.local.getBytesInUse(['meetings'])
+    console.log('Storage check - bytes used:', bytesInUse, 'meetings count:', meetings.length)
+    
+    // 容量制限に近づいたら古い会議を削除
+    if (bytesInUse > this.MAX_STORAGE_BYTES || meetings.length > this.MAX_MEETINGS) {
+      console.log('Storage limit approaching, cleaning up old meetings...')
+      // 古い順にソートして、半分を削除
+      meetings.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+      const keepCount = Math.min(Math.floor(meetings.length / 2), 50)
+      const removedMeetings = meetings.splice(0, meetings.length - keepCount)
+      console.log(`Removed ${removedMeetings.length} old meetings`)
     }
     
     await chrome.storage.local.set({ meetings })

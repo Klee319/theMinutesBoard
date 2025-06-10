@@ -1,4 +1,5 @@
 import { Transcript, Minutes, UserSettings } from '@/types'
+import { MINUTES_GENERATION_PROMPT } from '@/system-prompts'
 
 export abstract class BaseAIService {
   protected apiKey: string
@@ -27,7 +28,9 @@ export abstract class BaseAIService {
   protected calculateDuration(transcripts: Transcript[]): number {
     if (transcripts.length === 0) return 0
     
-    const timestamps = transcripts.map(t => new Date(t.timestamp).getTime())
+    const timestamps = transcripts.map(t => {
+      return t.timestamp instanceof Date ? t.timestamp.getTime() : new Date(t.timestamp).getTime()
+    })
     const start = Math.min(...timestamps)
     const end = Math.max(...timestamps)
     
@@ -40,18 +43,25 @@ export abstract class BaseAIService {
   }
 
   protected formatTranscriptsEnhanced(transcripts: Transcript[], startTime?: Date, endTime?: Date): string {
-    const sortedTranscripts = transcripts.sort((a, b) => 
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    )
+    const sortedTranscripts = transcripts.sort((a, b) => {
+      const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime()
+      const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime()
+      return aTime - bTime
+    })
     
     // 連続する同一話者の発言を統合
     const consolidatedTranscripts: Transcript[] = []
     let currentTranscript: Transcript | null = null
     
     sortedTranscripts.forEach(transcript => {
+      const currentTime = transcript.timestamp instanceof Date ? transcript.timestamp.getTime() : new Date(transcript.timestamp).getTime()
+      const prevTime = currentTranscript ? 
+        (currentTranscript.timestamp instanceof Date ? currentTranscript.timestamp.getTime() : new Date(currentTranscript.timestamp).getTime()) : 
+        0
+      
       if (currentTranscript && 
           currentTranscript.speaker === transcript.speaker &&
-          new Date(transcript.timestamp).getTime() - new Date(currentTranscript.timestamp).getTime() < 30000) {
+          currentTime - prevTime < 30000) {
         // 30秒以内の同一話者の発言は統合
         currentTranscript.content += ' ' + transcript.content
       } else {
@@ -87,7 +97,8 @@ export abstract class BaseAIService {
     
     const transcriptText = consolidatedTranscripts
       .map(t => {
-        const time = new Date(t.timestamp).toLocaleTimeString('ja-JP', { 
+        const timestamp = t.timestamp instanceof Date ? t.timestamp : new Date(t.timestamp)
+        const time = timestamp.toLocaleTimeString('ja-JP', { 
           hour: '2-digit', 
           minute: '2-digit',
           second: '2-digit'
@@ -99,35 +110,20 @@ export abstract class BaseAIService {
     return header + transcriptText
   }
 
-  protected getDefaultPrompt(): string {
-    return `あなたは会議の議事録作成の専門家です。以下の文字起こしから、構造化された議事録を作成してください。
-
-**議事録作成の指針:**
-1. 会議の目的と主要な議題を特定
-2. 各参加者の主要な発言を要約
-3. 重要な決定事項やアクションアイテムを明確に記録
-4. 日本語として自然で読みやすい文章に整理
-5. 文字起こしの不完全な部分は適切に補完
-
-**出力構造:**
-# 会議議事録
-## 概要
-## 参加者
-## 主要議題と討議内容
-## 決定事項
-## アクションアイテム
-## その他・備考`
+  protected getSystemPrompt(): string {
+    return MINUTES_GENERATION_PROMPT
   }
 
   // ユーザー設定のプロンプトを取得
   protected async getEnhancedPrompt(settings?: UserSettings): Promise<string> {
-    const defaultPrompt = this.getDefaultPrompt()
+    // システムプロンプトを必ず含める
+    let combinedPrompt = this.getSystemPrompt()
     
-    // ユーザー設定のプロンプトがあればそれを使用、なければデフォルト
+    // カスタムプロンプトがある場合は追加
     if (settings?.promptTemplate && settings.promptTemplate.trim()) {
-      return settings.promptTemplate
+      combinedPrompt += '\n\n## 追加のカスタム指示\n\n' + settings.promptTemplate
     }
     
-    return defaultPrompt
+    return combinedPrompt
   }
 }

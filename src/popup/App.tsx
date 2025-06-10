@@ -4,10 +4,9 @@ import { Meeting, StorageData, Minutes } from '@/types'
 function App() {
   const [isRecording, setIsRecording] = useState(false)
   const [currentMeeting, setCurrentMeeting] = useState<Meeting | null>(null)
-  const [recentMeetings, setRecentMeetings] = useState<Meeting[]>([])
   const [hasApiKey, setHasApiKey] = useState(false)
   const [isInMeet, setIsInMeet] = useState(false)
-  const [selectedMinutes, setSelectedMinutes] = useState<{ meeting: Meeting; minutes: Minutes } | null>(null)
+  const [aiProvider, setAiProvider] = useState<string>('gemini')
   
   useEffect(() => {
     loadData()
@@ -17,7 +16,6 @@ function App() {
   const loadData = async () => {
     chrome.storage.local.get(['meetings', 'settings', 'currentMeetingId'], (result) => {
       const meetings = result.meetings || []
-      setRecentMeetings(meetings.slice(-5).reverse())
       
       if (result.currentMeetingId) {
         const current = meetings.find((m: Meeting) => m.id === result.currentMeetingId)
@@ -33,7 +31,31 @@ function App() {
         setIsRecording(false)
       }
       
-      setHasApiKey(!!result.settings?.apiKey)
+      // AIプロバイダーに応じて適切なAPIキーを確認
+      if (result.settings) {
+        const provider = result.settings.aiProvider || 'gemini'
+        setAiProvider(provider)
+        let hasKey = false
+        switch (provider) {
+          case 'gemini':
+            hasKey = !!result.settings.apiKey
+            break
+          case 'openai':
+            hasKey = !!result.settings.openaiApiKey
+            break
+          case 'claude':
+            hasKey = !!result.settings.claudeApiKey
+            break
+          case 'openrouter':
+            hasKey = !!result.settings.openrouterApiKey
+            break
+          default:
+            hasKey = !!result.settings.apiKey
+        }
+        setHasApiKey(hasKey)
+      } else {
+        setHasApiKey(false)
+      }
     })
   }
   
@@ -112,62 +134,6 @@ function App() {
     chrome.runtime.openOptionsPage()
   }
   
-  const handleMeetingClick = (meeting: Meeting) => {
-    if (meeting.minutes) {
-      setSelectedMinutes({ meeting, minutes: meeting.minutes })
-    }
-  }
-  
-  const handleDownload = (format: 'markdown' | 'txt' | 'json') => {
-    if (!selectedMinutes) return
-    
-    let content = ''
-    let filename = `minutes_${new Date(selectedMinutes.meeting.startTime).toISOString().split('T')[0]}`
-    let mimeType = ''
-    
-    switch (format) {
-      case 'markdown':
-        content = selectedMinutes.minutes.content
-        filename += '.md'
-        mimeType = 'text/markdown'
-        break
-      case 'txt':
-        content = selectedMinutes.minutes.content.replace(/[#*`]/g, '')
-        filename += '.txt'
-        mimeType = 'text/plain'
-        break
-      case 'json':
-        content = JSON.stringify({
-          meeting: selectedMinutes.meeting,
-          minutes: selectedMinutes.minutes
-        }, null, 2)
-        filename += '.json'
-        mimeType = 'application/json'
-        break
-    }
-    
-    const blob = new Blob([content], { type: mimeType })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-  
-  const formatMarkdownToHTML = (markdown: string): string => {
-    return markdown
-      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-      .replace(/^\* (.+)$/gim, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-      .replace(/\*\*(.*)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*)\*/g, '<em>$1</em>')
-      .replace(/\n/g, '<br>')
-  }
   
   const formatDuration = (start: Date, end?: Date) => {
     const startTime = new Date(start).getTime()
@@ -184,10 +150,14 @@ function App() {
         <h1 className="text-xl font-bold text-gray-800">theMinutesBoard</h1>
         <button
           onClick={handleOpenOptions}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium"
           title="設定"
         >
-          ⚙️
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <span>設定</span>
         </button>
       </div>
       
@@ -197,7 +167,10 @@ function App() {
             <span className="text-yellow-600 text-lg">⚠️</span>
             <div className="flex-1">
               <p className="text-sm text-yellow-800 font-medium">
-                Gemini APIキーが設定されていません
+                {aiProvider === 'gemini' && 'Gemini'}
+                {aiProvider === 'openai' && 'OpenAI'}
+                {aiProvider === 'claude' && 'Claude'}
+                {aiProvider === 'openrouter' && 'OpenRouter'} APIキーが設定されていません
               </p>
               <button 
                 onClick={handleOpenOptions}
@@ -213,7 +186,10 @@ function App() {
           <div className="flex items-center gap-2">
             <span className="text-green-600 text-lg">✓</span>
             <p className="text-sm text-green-800">
-              APIキーが設定されています
+              {aiProvider === 'gemini' && 'Gemini'}
+              {aiProvider === 'openai' && 'OpenAI'}
+              {aiProvider === 'claude' && 'Claude'}
+              {aiProvider === 'openrouter' && 'OpenRouter'} APIキーが設定済み
             </p>
           </div>
         </div>
@@ -259,105 +235,17 @@ function App() {
       )}
       
       <div className="border-t pt-3">
-        <h2 className="text-sm font-semibold text-gray-700 mb-2">最近の議事録</h2>
-        {recentMeetings.length > 0 ? (
-          <div className="space-y-2">
-            {recentMeetings.map((meeting) => (
-              <div 
-                key={meeting.id}
-                onClick={() => handleMeetingClick(meeting)}
-                className={`p-2 rounded transition-colors ${
-                  meeting.minutes 
-                    ? 'bg-green-50 hover:bg-green-100 cursor-pointer border border-green-200' 
-                    : 'bg-gray-50 hover:bg-gray-100'
-                }`}
-              >
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-800 truncate">
-                      {meeting.title}
-                    </p>
-                    <p className="text-xs text-gray-600">
-                      {new Date(meeting.startTime).toLocaleDateString()} • 
-                      {meeting.participants.length}名
-                    </p>
-                  </div>
-                  {meeting.minutes ? (
-                    <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded font-medium">
-                      📄 議事録
-                    </span>
-                  ) : (
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
-                      記録のみ
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">まだ議事録がありません</p>
-        )}
+        <button
+          onClick={() => {
+            const url = chrome.runtime.getURL('src/viewer/viewer.html?mode=history')
+            chrome.tabs.create({ url })
+          }}
+          className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 font-medium"
+        >
+          <span>📋</span>
+          <span>履歴・ToDo確認</span>
+        </button>
       </div>
-      
-      {/* 議事録詳細モーダル */}
-      {selectedMinutes && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-4xl max-h-[90vh] w-full flex flex-col">
-            <div className="flex justify-between items-center p-6 border-b">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">
-                  {selectedMinutes.meeting.title}
-                </h3>
-                <p className="text-sm text-gray-600">
-                  {new Date(selectedMinutes.meeting.startTime).toLocaleString()} • 
-                  {selectedMinutes.meeting.participants.length}名参加
-                </p>
-              </div>
-              <button
-                onClick={() => setSelectedMinutes(null)}
-                className="text-gray-400 hover:text-gray-600 text-2xl font-bold"
-              >
-                ×
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-6">
-              <div 
-                className="prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{ __html: formatMarkdownToHTML(selectedMinutes.minutes.content) }}
-              />
-            </div>
-            
-            <div className="flex justify-end gap-3 p-6 border-t">
-              <button
-                onClick={() => setSelectedMinutes(null)}
-                className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
-              >
-                閉じる
-              </button>
-              <button
-                onClick={() => handleDownload('markdown')}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                📄 Markdown
-              </button>
-              <button
-                onClick={() => handleDownload('txt')}
-                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-              >
-                📝 テキスト
-              </button>
-              <button
-                onClick={() => handleDownload('json')}
-                className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
-              >
-                💾 JSON
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -15,10 +15,27 @@ class TranscriptCapture {
   private isCallActive = true
   private lastCallCheck = Date.now()
   private currentUserName: string | null = null
+  private participantsObserver: MutationObserver | null = null
+  private currentParticipants: Set<string> = new Set()
   
   constructor() {
+    this.initAsync()
+  }
+  
+  private async initAsync() {
+    await this.loadUserName()
     this.init()
-    this.loadUserName()
+  }
+  
+  private replaceYouWithUserName(speaker: string): string {
+    if (!this.currentUserName) return speaker
+    
+    if (speaker === 'あなた' || speaker === 'You' || speaker === '自分') {
+      console.log(`Replacing "${speaker}" with user name: ${this.currentUserName}`)
+      return this.currentUserName
+    }
+    
+    return speaker
   }
   
   private async loadUserName() {
@@ -26,6 +43,9 @@ class TranscriptCapture {
     const result = await chrome.storage.sync.get(['settings'])
     if (result.settings?.userName) {
       this.currentUserName = result.settings.userName
+      console.log('Loaded user name:', this.currentUserName)
+    } else {
+      console.log('No user name found in settings')
     }
   }
   
@@ -34,6 +54,7 @@ class TranscriptCapture {
     this.setupMessageListener()
     this.waitForCaptions()
     this.setupCallStatusMonitoring()
+    this.setupParticipantsMonitoring()
     this.checkExistingSession()
   }
   
@@ -371,7 +392,17 @@ class TranscriptCapture {
     this.hasGeneratedMinutes = false // 新しい記録開始時にリセット
     this.updateGenerateButtonText() // ボタンテキストを初期状態に戻す
     
-    chrome.runtime.sendMessage({ type: 'START_RECORDING' }, (response) => {
+    // 現在の参加者を検出して初期リストとする
+    this.detectParticipants()
+    const initialParticipants = Array.from(this.currentParticipants)
+    console.log('Initial participants:', initialParticipants)
+    
+    chrome.runtime.sendMessage({ 
+      type: 'START_RECORDING',
+      payload: {
+        initialParticipants: initialParticipants
+      }
+    }, (response) => {
       if (chrome.runtime.lastError) {
         console.error('Error sending START_RECORDING:', chrome.runtime.lastError)
       }
@@ -509,6 +540,181 @@ class TranscriptCapture {
     setInterval(checkMeetingElements, 5000)
   }
 
+  private setupParticipantsMonitoring() {
+    console.log('Setting up participants monitoring')
+    
+    // 参加者リストの要素を定期的にチェック
+    const checkParticipants = () => {
+      this.detectParticipants()
+    }
+    
+    // 初回チェック
+    setTimeout(checkParticipants, 3000)
+    
+    // 定期的なチェック
+    setInterval(checkParticipants, 10000)
+  }
+  
+  private detectParticipants() {
+    // 複数の可能なセレクタを試す
+    const participantSelectors = [
+      // 参加者パネルのセレクタ
+      '[role="list"][aria-label*="participant"]',
+      '[role="list"][aria-label*="参加者"]',
+      '[jsname="jrQDbd"]', // 参加者リスト
+      '[jsname="QpN8Cf"]', // 参加者パネル
+      '[jsname="UJrCaf"]', // 参加者項目
+      '.VfPpkd-rymPhb', // リストコンテナ
+      '.XAJgFc', // 参加者アイテム
+      '.GvcuGe', // 参加者名
+      '.ZjFb7c', // 参加者名（別パターン）
+      '.KV1GEc', // 参加者コンテナ
+      '.kvLJWc', // 参加者エリア
+      '[data-participant-id]', // 参加者ID属性
+      '[data-self-name]', // 自分の名前
+      '[data-requested-participant-id]', // 参加者ID
+      // 右側パネルの参加者リスト
+      '.c8mSod .VfPpkd-rymPhb-ibnC6b',
+      '.rua5Nb', // 参加者カウント
+      '.wnPUne', // 参加者数表示
+      // タイルビューの参加者
+      '[data-allocation-index]',
+      '[data-participant-placement-index]',
+      '[jsname="EydYod"]', // ビデオタイル
+      '[jsname="qcH9Lc"]', // 名前ラベル
+      '.dwSJ2e', // 参加者の名前表示
+      '.zWGUib', // 参加者の名前（タイルビュー）
+    ]
+    
+    const foundParticipants = new Set<string>()
+    
+    // 各セレクタを試す
+    for (const selector of participantSelectors) {
+      try {
+        const elements = document.querySelectorAll(selector)
+        
+        elements.forEach(element => {
+          // 名前を取得する複数の方法を試す
+          let participantName = ''
+          
+          // 方法1: テキストコンテンツから直接取得
+          const textContent = element.textContent?.trim()
+          if (textContent && textContent.length > 0 && textContent.length < 100) {
+            // 不要な文字を除去
+            const cleanName = textContent
+              .replace(/\(あなた\)/g, '')
+              .replace(/\(You\)/g, '')
+              .replace(/\(自分\)/g, '')
+              .replace(/\(主催者\)/g, '')
+              .replace(/\(Host\)/g, '')
+              .replace(/\(プレゼンテーション中\)/g, '')
+              .replace(/\(画面を固定\)/g, '')
+              .replace(/\s+/g, ' ')
+              .trim()
+            
+            if (cleanName && cleanName.length > 1) {
+              participantName = cleanName
+            }
+          }
+          
+          // 方法2: aria-label属性から取得
+          const ariaLabel = element.getAttribute('aria-label')
+          if (ariaLabel && ariaLabel.includes('参加者') === false) {
+            participantName = ariaLabel.trim()
+          }
+          
+          // 方法3: data属性から取得
+          const dataName = element.getAttribute('data-participant-name') || 
+                          element.getAttribute('data-self-name')
+          if (dataName) {
+            participantName = dataName.trim()
+          }
+          
+          // 方法4: 子要素から名前を探す
+          if (!participantName) {
+            const nameElements = element.querySelectorAll('.GvcuGe, .ZjFb7c, .dwSJ2e, .zWGUib, [jsname="qcH9Lc"]')
+            nameElements.forEach(nameEl => {
+              const name = nameEl.textContent?.trim()
+              if (name && name.length > 1 && name.length < 100) {
+                participantName = name
+              }
+            })
+          }
+          
+          // 有効な名前が見つかった場合は追加
+          if (participantName && participantName.length > 1) {
+            foundParticipants.add(participantName)
+            console.log(`Found participant: ${participantName} (selector: ${selector})`)
+          }
+        })
+      } catch (error) {
+        console.error(`Error with selector ${selector}:`, error)
+      }
+    }
+    
+    // 参加者リストが更新された場合
+    if (foundParticipants.size > 0) {
+      const participantsArray = Array.from(foundParticipants)
+      
+      // 新しい参加者を検出
+      const newParticipants = participantsArray.filter(p => !this.currentParticipants.has(p))
+      const leftParticipants = Array.from(this.currentParticipants).filter(p => !foundParticipants.has(p))
+      
+      if (newParticipants.length > 0 || leftParticipants.length > 0) {
+        console.log('Participants update detected')
+        console.log('Current participants:', participantsArray)
+        console.log('New participants:', newParticipants)
+        console.log('Left participants:', leftParticipants)
+        
+        // 現在の参加者リストを更新
+        this.currentParticipants = new Set(participantsArray)
+        
+        // 記録中の場合、参加者の変更を記録
+        if (this.isRecording) {
+          newParticipants.forEach(participant => {
+            chrome.runtime.sendMessage({
+              type: 'PARTICIPANT_UPDATE',
+              payload: {
+                action: 'joined',
+                participant: participant,
+                timestamp: new Date().toISOString()
+              }
+            })
+          })
+          
+          leftParticipants.forEach(participant => {
+            chrome.runtime.sendMessage({
+              type: 'PARTICIPANT_UPDATE',
+              payload: {
+                action: 'left',
+                participant: participant,
+                timestamp: new Date().toISOString()
+              }
+            })
+          })
+        }
+      }
+    }
+    
+    // 参加者数のカウントも試みる
+    const countSelectors = [
+      '.rua5Nb', // 参加者カウント
+      '.wnPUne', // 参加者数
+      '.gV3Svc>span', // 参加者数の別パターン
+      '[jsname="EydYod"]' // ビデオタイルの数をカウント
+    ]
+    
+    for (const selector of countSelectors) {
+      const countElement = document.querySelector(selector)
+      if (countElement) {
+        const countText = countElement.textContent?.trim()
+        if (countText && /\d+/.test(countText)) {
+          console.log(`Participant count from ${selector}: ${countText}`)
+        }
+      }
+    }
+  }
+
   private handleCallEnded(reason: string) {
     if (!this.isCallActive) return // 既に処理済み
     
@@ -533,6 +739,12 @@ class TranscriptCapture {
     if (this.callStatusObserver) {
       this.callStatusObserver.disconnect()
       this.callStatusObserver = null
+    }
+    
+    // 参加者オブザーバーのクリーンアップ
+    if (this.participantsObserver) {
+      this.participantsObserver.disconnect()
+      this.participantsObserver = null
     }
   }
   
@@ -576,15 +788,23 @@ class TranscriptCapture {
       const allText = this.captionsContainer.textContent?.trim()
       if (allText && allText !== this.lastCaption && allText.length > 2) {
         this.lastCaption = allText
+        
+        // フォールバックでも「あなた」チェックを行う
+        let speaker = 'Unknown'
+        if (this.currentUserName && (allText.includes('あなた:') || allText.includes('You:') || allText.includes('自分:'))) {
+          speaker = this.currentUserName
+          console.log('Fallback: detected "あなた" pattern, using user name:', this.currentUserName)
+        }
+        
         chrome.runtime.sendMessage({
           type: 'TRANSCRIPT_UPDATE',
           payload: {
-            speaker: 'Unknown',
+            speaker: speaker,
             content: allText
           }
         })
         
-        console.log(`[Unknown]: ${allText}`)
+        console.log(`[${speaker}]: ${allText}`)
       }
       return
     }
@@ -671,10 +891,7 @@ class TranscriptCapture {
               console.log(`Parsed from full text - Speaker: ${possibleSpeaker}, Text: ${possibleText}`)
               
               // 「あなた」を利用者名に置換
-              let finalSpeaker = possibleSpeaker
-              if ((possibleSpeaker === 'あなた' || possibleSpeaker === 'You' || possibleSpeaker === '自分') && this.currentUserName) {
-                finalSpeaker = this.currentUserName
-              }
+              let finalSpeaker = this.replaceYouWithUserName(possibleSpeaker)
               
               if (possibleText !== this.lastCaption && possibleText.length > 2) {
                 this.lastCaption = possibleText
@@ -705,8 +922,22 @@ class TranscriptCapture {
       const text = textElement?.textContent?.trim() || ''
       
       // 「あなた」または「You」を利用者名に置換
-      if ((speaker === 'あなた' || speaker === 'You' || speaker === '自分') && this.currentUserName) {
-        speaker = this.currentUserName
+      speaker = this.replaceYouWithUserName(speaker)
+      
+      // speakerがUnknownで、実際は「あなた」である場合をチェック
+      if (speaker === 'Unknown' && this.currentUserName) {
+        const fullText = element.textContent?.trim() || ''
+        // 複数のパターンで「あなた」を検出
+        if (fullText.includes('あなた:') || fullText.includes('You:') || fullText.includes('自分:') ||
+            fullText.startsWith('あなた ') || fullText.startsWith('You ') || fullText.startsWith('自分 ') ||
+            fullText.includes('あなた') || fullText.includes('You') || fullText.includes('自分')) {
+          // より正確なチェック：speakerElementが「あなた」を含んでいるか
+          const speakerText = speakerElement?.textContent?.trim() || ''
+          if (speakerText.includes('あなた') || speakerText.includes('You') || speakerText.includes('自分') ||
+              fullText.indexOf('あなた') < 10 || fullText.indexOf('You') < 10 || fullText.indexOf('自分') < 10) {
+            speaker = this.currentUserName
+          }
+        }
       }
       
       // スピーカー名がテキストに含まれている場合は除去
@@ -718,6 +949,21 @@ class TranscriptCapture {
       if (cleanText && cleanText !== this.lastCaption && cleanText.length > 2) {
         this.lastCaption = cleanText
         this.currentSpeaker = speaker
+        
+        // speakerがUnknownの場合は、ここでも「あなた」チェックを行う
+        if (speaker === 'Unknown' && this.currentUserName) {
+          // フォールバック処理でUnknownになった場合の再チェック
+          const fullText = element.textContent?.trim() || ''
+          if (fullText.includes('あなた:') || fullText.includes('You:') || fullText.includes('自分:') ||
+              fullText.includes('あなた') || fullText.includes('You') || fullText.includes('自分')) {
+            // より詳細なチェック
+            const speakerText = speakerElement?.textContent?.trim() || ''
+            if (speakerText.includes('あなた') || speakerText.includes('You') || speakerText.includes('自分') ||
+                fullText.indexOf('あなた') < 10 || fullText.indexOf('You') < 10 || fullText.indexOf('自分') < 10) {
+              speaker = this.currentUserName
+            }
+          }
+        }
         
         chrome.runtime.sendMessage({
           type: 'TRANSCRIPT_UPDATE',

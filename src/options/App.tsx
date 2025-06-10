@@ -3,16 +3,7 @@ import { UserSettings, ExportFormat, AIProvider, AIModel } from '@/types'
 import { geminiService } from '@/services/gemini'
 import { AIServiceFactory } from '@/services/ai/factory'
 
-const DEFAULT_PROMPT = `以下の会議の文字起こしから、構造化された議事録を作成してください。
-
-要件：
-1. 会議の概要（日時、参加者、主な議題）
-2. 主要な議論ポイント（箇条書き）
-3. 決定事項
-4. アクションアイテム（担当者と期限を含む）
-5. 次回の予定
-
-フォーマットはMarkdown形式でお願いします。`
+const DEFAULT_PROMPT = '' // カスタムプロンプトのデフォルトは空
 
 const AI_MODELS: Record<AIProvider, AIModel[]> = {
   gemini: [
@@ -126,7 +117,7 @@ function App() {
           // APIキーがある場合は自動的に検証
           const apiKey = getCurrentApiKeyFromSettings(mergedSettings)
           if (apiKey) {
-            validateApiKey(apiKey)
+            validateApiKey(apiKey, mergedSettings)
           }
         }
       })
@@ -143,7 +134,7 @@ function App() {
     }
   }
   
-  const validateApiKey = async (apiKey: string) => {
+  const validateApiKey = async (apiKey: string, passedSettings?: any) => {
     if (!apiKey) {
       setApiKeyStatus('unchecked')
       return
@@ -153,9 +144,25 @@ function App() {
     setApiKeyStatus('checking')
     
     try {
-      // 現在の設定に基づいてAIサービスを作成
-      const tempSettings = { ...settings }
-      updateCurrentApiKey(apiKey) // 一時的にAPIキーを設定
+      // 渡された設定を使用するか、現在の設定を使用
+      const settingsToUse = passedSettings || settings
+      const tempSettings = { ...settingsToUse }
+      
+      // APIキーを適切なフィールドに設定
+      switch (tempSettings.aiProvider) {
+        case 'gemini':
+          tempSettings.apiKey = apiKey
+          break
+        case 'openai':
+          tempSettings.openaiApiKey = apiKey
+          break
+        case 'claude':
+          tempSettings.claudeApiKey = apiKey
+          break
+        case 'openrouter':
+          tempSettings.openrouterApiKey = apiKey
+          break
+      }
       
       const aiService = AIServiceFactory.createService(tempSettings)
       const isValid = await aiService.validateApiKey(apiKey)
@@ -473,20 +480,17 @@ function App() {
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  プロンプトテンプレート
+                  カスタムプロンプト
                 </label>
                 <textarea
                   value={settings.promptTemplate}
                   onChange={(e) => setSettings({ ...settings, promptTemplate: e.target.value })}
                   className="input min-h-[200px]"
-                  placeholder="議事録生成のためのプロンプトを入力してください"
+                  placeholder="カスタムプロンプトを入力（空欄の場合はシステムプロンプトを使用）"
                 />
-                <button
-                  onClick={handleReset}
-                  className="text-sm text-primary-600 hover:underline mt-2"
-                >
-                  デフォルトに戻す
-                </button>
+                <p className="text-xs text-gray-500 mt-1">
+                  空欄の場合は、システムが用意した最適なプロンプトが使用されます
+                </p>
               </div>
             </div>
           </div>

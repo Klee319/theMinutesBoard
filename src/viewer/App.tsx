@@ -9,8 +9,10 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [isDownloadDropdownOpen, setIsDownloadDropdownOpen] = useState(false)
   const [isMinutesGenerating, setIsMinutesGenerating] = useState(false)
+  const [currentTab, setCurrentTab] = useState<'history' | 'nextsteps'>('history')
 
   useEffect(() => {
+    console.log('Initial useEffect - loading data')
     loadData()
     
     // URLパラメータから会議IDを取得
@@ -29,7 +31,50 @@ function App() {
         }
       })
     } else if (mode === 'history') {
+      console.log('URL mode is history - setting states')
       setIsLiveMode(false)
+      setCurrentTab('history')
+    }
+    
+    // デバッグ用: グローバル関数を追加
+    (window as any).createTestMeeting = async () => {
+      const testMeeting: Meeting = {
+        id: `test_${Date.now()}`,
+        title: 'テスト会議 ' + new Date().toLocaleString('ja-JP'),
+        startTime: new Date(Date.now() - 3600000), // 1時間前
+        endTime: new Date(),
+        participants: ['田中太郎', '佐藤花子', '鈴木一郎'],
+        transcripts: [
+          {
+            id: 'trans_1',
+            speaker: '田中太郎',
+            content: 'それでは、本日の会議を始めさせていただきます。',
+            timestamp: new Date(Date.now() - 3500000),
+            meetingId: ''
+          },
+          {
+            id: 'trans_2',
+            speaker: '佐藤花子',
+            content: 'プロジェクトの進捗について報告します。',
+            timestamp: new Date(Date.now() - 3400000),
+            meetingId: ''
+          }
+        ],
+        minutes: {
+          id: 'minutes_1',
+          content: `# テスト会議議事録\n\n## 概要\n- **参加者**: 田中太郎、佐藤花子、鈴木一郎\n- **会議の目的**: プロジェクト進捗確認\n\n## 決定事項\n- **次回の会議は来週月曜日に実施**`,
+          generatedAt: new Date(),
+          format: 'markdown' as const
+        }
+      }
+      
+      const result = await chrome.storage.local.get(['meetings'])
+      const meetings = result.meetings || []
+      meetings.push(testMeeting)
+      await chrome.storage.local.set({ meetings })
+      
+      console.log('Test meeting created:', testMeeting.id)
+      loadData() // データを再読み込み
     }
     
     // ストレージの変更を監視
@@ -55,10 +100,32 @@ function App() {
     }
   }, [])
 
+  // 状態変更を監視
+  useEffect(() => {
+    console.log('State changed - isLiveMode:', isLiveMode, 'currentTab:', currentTab, 'allMeetings:', allMeetings.length)
+  }, [isLiveMode, currentTab, allMeetings])
+
   const loadData = () => {
     chrome.storage.local.get(['meetings', 'currentMeetingId'], (result) => {
+      console.log('Viewer loading data - meetings count:', result.meetings?.length || 0)
+      console.log('Raw meetings data:', result.meetings)
+      console.log('Current isLiveMode:', isLiveMode)
+      console.log('Current currentTab:', currentTab)
       const meetings = result.meetings || []
       setAllMeetings(meetings)
+      
+      // デバッグ: 各会議の詳細をログ出力
+      meetings.forEach((meeting: Meeting, index: number) => {
+        console.log(`Meeting ${index}:`, {
+          id: meeting.id,
+          title: meeting.title,
+          startTime: meeting.startTime,
+          hasMinutes: !!meeting.minutes
+        })
+      })
+      
+      // allMeetingsの状態を確認
+      console.log('allMeetings state after setAllMeetings:', meetings)
       
       if (result.currentMeetingId && isLiveMode) {
         const current = meetings.find((m: Meeting) => m.id === result.currentMeetingId)
@@ -111,6 +178,9 @@ function App() {
         type: 'STOP_RECORDING'
       }, (response) => {
         if (response?.success) {
+          // 停止成功後、currentMeetingをクリアしてUIを更新
+          setCurrentMeeting(null)
+          setIsMinutesGenerating(false)
           // データの再読み込み
           setTimeout(loadData, 500)
         } else {
@@ -167,6 +237,37 @@ function App() {
       .replace(/\n/g, '<br>')
   }
 
+  const extractMeetingTopic = (content: string): string => {
+    // 議題を抽出する（いくつかのパターンを試す）
+    const patterns = [
+      /議題[:：]\s*(.+?)[\n\r]/,
+      /主な議題[:：]\s*(.+?)[\n\r]/,
+      /主要議題[:：]\s*(.+?)[\n\r]/,
+      /## 議題\s*\n(.+?)[\n\r]/,
+      /## 主な議題\s*\n(.+?)[\n\r]/,
+      /## 概要\s*\n(.+?)[\n\r]/,
+      /^#+ .+?議事録\s*\n+(.+?)[\n\r]/m
+    ]
+    
+    for (const pattern of patterns) {
+      const match = content.match(pattern)
+      if (match && match[1]) {
+        const topic = match[1].trim()
+        // 最大20文字に制限
+        return topic.length > 20 ? topic.substring(0, 20) + '...' : topic
+      }
+    }
+    
+    // 議題が見つからない場合は、最初の内容を表示
+    const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'))
+    if (lines.length > 0) {
+      const firstContent = lines[0].trim()
+      return firstContent.length > 20 ? firstContent.substring(0, 20) + '...' : firstContent
+    }
+    
+    return '議題なし'
+  }
+
   const displayMeeting = selectedMeeting || currentMeeting
 
   return (
@@ -189,92 +290,116 @@ function App() {
                   ライブ表示
                 </button>
                 <button
-                  onClick={() => setIsLiveMode(false)}
+                  onClick={() => {
+                    console.log('History button clicked')
+                    setIsLiveMode(false)
+                    setCurrentTab('history')
+                    // 状態更新後にデータを再読み込み
+                    setTimeout(() => {
+                      console.log('After state update - isLiveMode:', false, 'currentTab:', 'history')
+                      loadData()
+                    }, 100)
+                  }}
                   className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                    !isLiveMode
+                    !isLiveMode && currentTab === 'history'
                       ? 'bg-blue-100 text-blue-800'
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
                   履歴
                 </button>
+                <button
+                  onClick={() => {
+                    setIsLiveMode(false)
+                    setCurrentTab('nextsteps')
+                  }}
+                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                    !isLiveMode && currentTab === 'nextsteps'
+                      ? 'bg-blue-100 text-blue-800'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  ネクストステップ
+                </button>
               </div>
             </div>
             
-            {displayMeeting && (
-              <div className="flex items-center gap-2">
-                {isLiveMode && currentMeeting && (
-                  <>
-                    <button
-                      onClick={stopRecording}
-                      className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors border border-red-600 hover:border-red-700"
-                    >
-                      ⏹ 記録停止
-                    </button>
-                    <button
-                      onClick={generateMinutes}
-                      disabled={isMinutesGenerating}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                      {isMinutesGenerating ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          <span>生成中...</span>
-                        </>
-                      ) : (
-                        currentMeeting.minutes ? '📝 議事録を更新' : '✨ 議事録生成'
+            <div className="flex items-center gap-2 min-h-[40px]">
+              {displayMeeting && (
+                <>
+                  {isLiveMode && currentMeeting && (
+                    <>
+                      <button
+                        onClick={stopRecording}
+                        className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors border border-red-600 hover:border-red-700"
+                      >
+                        ⏹ 記録停止
+                      </button>
+                      <button
+                        onClick={generateMinutes}
+                        disabled={isMinutesGenerating}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {isMinutesGenerating ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            <span>生成中...</span>
+                          </>
+                        ) : (
+                          currentMeeting.minutes ? '📝 議事録を更新' : '✨ 議事録生成'
+                        )}
+                      </button>
+                    </>
+                  )}
+                  
+                  {displayMeeting.minutes && (
+                    <div className="relative">
+                      <button
+                        onClick={() => setIsDownloadDropdownOpen(!isDownloadDropdownOpen)}
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors text-sm"
+                      >
+                        💾 ダウンロード
+                        <svg className={`w-4 h-4 transition-transform ${isDownloadDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      
+                      {isDownloadDropdownOpen && (
+                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-10">
+                          <button
+                            onClick={() => {
+                              downloadMinutes('markdown')
+                              setIsDownloadDropdownOpen(false)
+                            }}
+                            className="flex items-center gap-3 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                          >
+                            📄 <span>Markdown (.md)</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              downloadMinutes('txt')
+                              setIsDownloadDropdownOpen(false)
+                            }}
+                            className="flex items-center gap-3 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                          >
+                            📝 <span>テキスト (.txt)</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              downloadMinutes('json')
+                              setIsDownloadDropdownOpen(false)
+                            }}
+                            className="flex items-center gap-3 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                          >
+                            💾 <span>JSON (.json)</span>
+                          </button>
+                        </div>
                       )}
-                    </button>
-                  </>
-                )}
-                
-                {displayMeeting.minutes && (
-                  <div className="relative">
-                    <button
-                      onClick={() => setIsDownloadDropdownOpen(!isDownloadDropdownOpen)}
-                      className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors text-sm"
-                    >
-                      💾 ダウンロード
-                      <svg className={`w-4 h-4 transition-transform ${isDownloadDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-                    
-                    {isDownloadDropdownOpen && (
-                      <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-10">
-                        <button
-                          onClick={() => {
-                            downloadMinutes('markdown')
-                            setIsDownloadDropdownOpen(false)
-                          }}
-                          className="flex items-center gap-3 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                        >
-                          📄 <span>Markdown (.md)</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            downloadMinutes('txt')
-                            setIsDownloadDropdownOpen(false)
-                          }}
-                          className="flex items-center gap-3 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                        >
-                          📝 <span>テキスト (.txt)</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            downloadMinutes('json')
-                            setIsDownloadDropdownOpen(false)
-                          }}
-                          className="flex items-center gap-3 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                        >
-                          💾 <span>JSON (.json)</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -282,14 +407,64 @@ function App() {
       <div className="max-w-7xl mx-auto p-4">
         <div className="grid grid-cols-12 gap-6">
           {/* サイドバー（履歴モード時のみ表示） */}
-          {!isLiveMode && (
+          {console.log('Sidebar render check - isLiveMode:', isLiveMode, 'currentTab:', currentTab, 'allMeetings:', allMeetings.length)}
+          {!isLiveMode && currentTab === 'history' && (
             <div className="col-span-3">
               <div className="bg-white rounded-lg shadow-sm p-4">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">会議履歴</h2>
                 <div className="space-y-2">
-                  {allMeetings
-                    .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
-                    .map((meeting) => (
+                  {console.log('Rendering meetings list, count:', allMeetings.length)}
+                  {console.log('All meetings data:', allMeetings)}
+                  {allMeetings.length === 0 ? (
+                    <p className="text-sm text-gray-500 text-center py-4">
+                      まだ会議の記録がありません
+                    </p>
+                  ) : (
+                    <>
+                    <p className="text-xs text-gray-600 mb-2">
+                      {allMeetings.length}件の会議があります
+                    </p>
+                    {allMeetings
+                    .filter((meeting) => {
+                      // Invalid Dateを除外
+                      try {
+                        // startTimeがオブジェクトの場合の処理
+                        let startTime = meeting.startTime
+                        if (typeof startTime === 'object' && startTime !== null && !startTime instanceof Date) {
+                          // Firestoreタイムスタンプ形式の可能性
+                          if ('seconds' in startTime || '_seconds' in startTime) {
+                            const seconds = startTime.seconds || startTime._seconds
+                            startTime = new Date(seconds * 1000)
+                          } else if ('toDate' in startTime && typeof startTime.toDate === 'function') {
+                            startTime = startTime.toDate()
+                          } else {
+                            // その他のオブジェクト形式
+                            console.log('Unknown date object format:', meeting.id, startTime)
+                            return true // とりあえず表示する
+                          }
+                        }
+                        const date = new Date(startTime)
+                        const isValid = !isNaN(date.getTime())
+                        if (!isValid) {
+                          console.log('Invalid date for meeting:', meeting.id, meeting.startTime)
+                        }
+                        return true // 日付が無効でも表示する
+                      } catch (e) {
+                        console.error('Date processing error:', e)
+                        return true
+                      }
+                    })
+                    .sort((a, b) => {
+                      try {
+                        // 簡易的にtitleの日付文字列でソート
+                        return b.title.localeCompare(a.title)
+                      } catch (e) {
+                        return 0
+                      }
+                    })
+                    .map((meeting) => {
+                      console.log('Rendering meeting item:', meeting.id, meeting.title)
+                      return (
                       <div
                         key={meeting.id}
                         onClick={() => handleMeetingSelect(meeting)}
@@ -300,31 +475,50 @@ function App() {
                         }`}
                       >
                         <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-900 truncate">
-                              {meeting.title}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900">
+                              {meeting.title || 'Unknown date'}
                             </p>
-                            <p className="text-xs text-gray-600">
-                              {new Date(meeting.startTime).toLocaleDateString()}
-                            </p>
+                            {meeting.transcripts && meeting.transcripts.length > 0 && (
+                              <p className="text-xs text-gray-600 mt-1">
+                                発言数: {meeting.transcripts.length}
+                              </p>
+                            )}
+                            {meeting.minutes && (
+                              <p className="text-xs text-gray-700 truncate mt-1 font-medium" title={extractMeetingTopic(meeting.minutes.content)}>
+                                {extractMeetingTopic(meeting.minutes.content)}
+                              </p>
+                            )}
                           </div>
                           {meeting.minutes && (
-                            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded ml-2 flex-shrink-0">
                               議事録
                             </span>
                           )}
                         </div>
                       </div>
-                    ))}
+                    )})}
+                    </>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
           {/* メインコンテンツ */}
-          <div className={isLiveMode ? 'col-span-12' : 'col-span-9'}>
+          <div className={isLiveMode ? 'col-span-12' : currentTab === 'history' ? 'col-span-9' : 'col-span-12'}>
             
-            {displayMeeting ? (
+            {/* ネクストステップタブの内容 */}
+            {!isLiveMode && currentTab === 'nextsteps' && (
+              <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+                <div className="text-6xl mb-4">📋</div>
+                <p className="text-xl text-gray-600 mb-4">ネクストステップ機能は準備中です</p>
+                <p className="text-gray-500">会議の決定事項から次のアクションを管理できるようになります</p>
+              </div>
+            )}
+            
+            {/* 履歴タブまたはライブ表示の内容 */}
+            {(isLiveMode || currentTab === 'history') && displayMeeting ? (
               <div className="bg-white rounded-lg shadow-sm">
                 {/* 会議情報ヘッダー */}
                 <div className="p-6 border-b">
@@ -334,11 +528,14 @@ function App() {
                         {displayMeeting.title}
                       </h2>
                       <div className="flex items-center gap-4 text-sm text-gray-600">
-                        <span>📅 {new Date(displayMeeting.startTime).toLocaleString()}</span>
-                        <span>👥 {displayMeeting.participants.length}名参加</span>
-                        <span>💬 {displayMeeting.transcripts.length}件の発言</span>
+                        {displayMeeting.participants && (
+                          <span>参加者: {displayMeeting.participants.length}名</span>
+                        )}
+                        {displayMeeting.transcripts && (
+                          <span>発言数: {displayMeeting.transcripts.length}件</span>
+                        )}
                         {isLiveMode && lastUpdated && (
-                          <span>🔄 {lastUpdated.toLocaleTimeString()} 更新</span>
+                          <span>最終更新: {lastUpdated.toLocaleTimeString()}</span>
                         )}
                       </div>
                     </div>
@@ -361,16 +558,6 @@ function App() {
                       <div dangerouslySetInnerHTML={{ 
                         __html: formatMarkdownToHTML(displayMeeting.minutes.content) 
                       }} />
-                      
-                      <div className="mt-8 pt-4 border-t border-gray-200 text-sm text-gray-500">
-                        生成日時: {new Date(displayMeeting.minutes.generatedAt).toLocaleString()}
-                        {displayMeeting.minutes.metadata && (
-                          <>
-                            {' • '}
-                            単語数: {displayMeeting.minutes.metadata.wordCount}
-                          </>
-                        )}
-                      </div>
                     </div>
                   ) : (
                     <div className="text-center py-12">
@@ -396,7 +583,7 @@ function App() {
                   )}
                 </div>
               </div>
-            ) : (
+            ) : (isLiveMode || currentTab === 'history') ? (
               <div className="bg-white rounded-lg shadow-sm p-12 text-center">
                 {isLiveMode ? (
                   <>
@@ -412,7 +599,7 @@ function App() {
                   </>
                 )}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

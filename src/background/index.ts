@@ -1,6 +1,7 @@
 import { ChromeMessage, MessageType, StorageData, Meeting, UserSettings } from '@/types'
 import { geminiService } from '@/services/gemini'
 import { AIServiceFactory } from '@/services/ai/factory'
+import { debugStorageInfo } from './debug'
 
 let currentMeetingId: string | null = null
 let recordingTabId: number | null = null
@@ -8,13 +9,38 @@ let recordingTabId: number | null = null
 // 議事録生成の排他制御
 let isMinutesGenerating = false
 
+// 拡張機能のインストール・更新時の処理
+chrome.runtime.onInstalled.addListener((details) => {
+  console.log('Extension installed/updated:', details.reason)
+  
+  // データの整合性チェック
+  chrome.storage.local.get(['meetings'], (result) => {
+    if (chrome.runtime.lastError) {
+      console.error('Storage error on install:', chrome.runtime.lastError)
+      return
+    }
+    
+    const meetings = result.meetings || []
+    console.log(`Extension ${details.reason} - existing meetings: ${meetings.length}`)
+    
+    // データが破損していないか確認
+    if (meetings.length > 0 && !Array.isArray(meetings)) {
+      console.error('Corrupted meetings data detected, initializing...')
+      chrome.storage.local.set({ meetings: [] })
+    }
+  })
+})
+
 // 起動時に前回の状態を確認
 chrome.runtime.onStartup.addListener(() => {
-  chrome.storage.local.get(['currentMeetingId'], (result) => {
+  chrome.storage.local.get(['currentMeetingId', 'meetings'], (result) => {
+    console.log('Extension startup - Current meetings count:', result.meetings?.length || 0)
     if (result.currentMeetingId) {
       // 前回のセッションが残っている場合はクリア
       chrome.storage.local.remove(['currentMeetingId'])
     }
+    // デバッグ情報を出力
+    debugStorageInfo()
   })
 })
 
@@ -24,7 +50,7 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
   try {
     switch (message.type) {
       case 'START_RECORDING':
-        handleStartRecording(sender.tab?.id)
+        handleStartRecording(sender.tab?.id, message.payload)
           .then(() => sendResponse({ success: true }))
           .catch(error => {
             console.error('Error starting recording:', error)
@@ -95,6 +121,15 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
           })
         return true
         
+      case 'PARTICIPANT_UPDATE':
+        handleParticipantUpdate(message.payload)
+          .then(() => sendResponse({ success: true }))
+          .catch(error => {
+            console.error('Error updating participant:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
       default:
         sendResponse({ success: false, error: 'Unknown message type' })
         return false
@@ -106,7 +141,7 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
   }
 })
 
-async function handleStartRecording(tabId?: number): Promise<void> {
+async function handleStartRecording(tabId?: number, payload?: any): Promise<void> {
   if (!tabId) {
     throw new Error('No tab ID provided')
   }
@@ -122,9 +157,9 @@ async function handleStartRecording(tabId?: number): Promise<void> {
   
   const newMeeting: Meeting = {
     id: currentMeetingId,
-    title: `Meeting ${new Date().toLocaleString('ja-JP')}`,
+    title: new Date().toLocaleString('ja-JP'),
     startTime: new Date(),
-    participants: [],
+    participants: payload?.initialParticipants || [],
     transcripts: []
   }
   
@@ -145,6 +180,12 @@ async function handleStartRecording(tabId?: number): Promise<void> {
           reject(new Error(chrome.runtime.lastError.message))
         } else {
           console.log('Recording started:', currentMeetingId)
+          console.log('Initial participants:', newMeeting.participants)
+          console.log('Total meetings after save:', meetings.length)
+          // ストレージ容量を確認
+          chrome.storage.local.getBytesInUse(['meetings'], (bytesInUse) => {
+            console.log('Storage used for meetings:', bytesInUse, 'bytes')
+          })
           resolve()
         }
       })
@@ -181,15 +222,19 @@ async function handleStopRecording(): Promise<void> {
             currentMeetingId = null
             recordingTabId = null
             chrome.storage.local.remove(['currentMeetingId'], () => {
-              // Content Scriptに停止完了を通知
-              if (stoppedTabId) {
-                chrome.tabs.sendMessage(stoppedTabId, {
-                  type: 'RECORDING_STOPPED',
-                  payload: { meetingId: stoppedMeetingId }
-                }).catch(() => {
-                  // エラーは無視（タブが閉じられている可能性）
+              // 全てのGoogle Meetタブに停止完了を通知
+              chrome.tabs.query({ url: 'https://meet.google.com/*' }, (tabs) => {
+                tabs.forEach(tab => {
+                  if (tab.id) {
+                    chrome.tabs.sendMessage(tab.id, {
+                      type: 'RECORDING_STOPPED',
+                      payload: { meetingId: stoppedMeetingId }
+                    }).catch(() => {
+                      // エラーは無視（タブが閉じられている可能性）
+                    })
+                  }
                 })
-              }
+              })
               resolve()
             })
           }
@@ -263,6 +308,14 @@ async function handleGenerateMinutes(): Promise<any> {
           resolve({ success: false, error: chrome.runtime.lastError.message })
           return
         }
+        
+        // データ整合性チェック
+        if (!result.meetings || !Array.isArray(result.meetings)) {
+          console.error('Invalid meetings data:', result.meetings)
+          isMinutesGenerating = false
+          resolve({ success: false, error: 'ストレージデータが破損しています' })
+          return
+        }
       
       const meetings: Meeting[] = result.meetings || []
       const currentMeeting = meetings.find(m => m.id === currentMeetingId)
@@ -300,8 +353,8 @@ async function handleGenerateMinutes(): Promise<any> {
           currentMeeting.transcripts,
           result.settings,
           {
-            startTime: currentMeeting.startTime,
-            endTime: currentMeeting.endTime || new Date()
+            startTime: new Date(currentMeeting.startTime),
+            endTime: currentMeeting.endTime ? new Date(currentMeeting.endTime) : new Date()
           }
         )
         
@@ -423,6 +476,67 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     handleStopRecording()
   }
 })
+
+async function handleParticipantUpdate(payload: any): Promise<void> {
+  if (!currentMeetingId) {
+    console.log('No active recording for participant update')
+    return
+  }
+  
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(['meetings'], (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message))
+        return
+      }
+      
+      const meetings: Meeting[] = result.meetings || []
+      const meetingIndex = meetings.findIndex(m => m.id === currentMeetingId)
+      
+      if (meetingIndex !== -1) {
+        const participants = new Set(meetings[meetingIndex].participants)
+        
+        if (payload.action === 'joined') {
+          participants.add(payload.participant)
+          console.log(`Participant joined: ${payload.participant}`)
+          
+          // 参加者の入室を記録
+          meetings[meetingIndex].transcripts.push({
+            id: generateTranscriptId(),
+            meetingId: currentMeetingId,
+            speaker: 'System',
+            content: `${payload.participant} が参加しました`,
+            timestamp: new Date(payload.timestamp)
+          })
+        } else if (payload.action === 'left') {
+          participants.delete(payload.participant)
+          console.log(`Participant left: ${payload.participant}`)
+          
+          // 参加者の退室を記録
+          meetings[meetingIndex].transcripts.push({
+            id: generateTranscriptId(),
+            meetingId: currentMeetingId,
+            speaker: 'System',
+            content: `${payload.participant} が退出しました`,
+            timestamp: new Date(payload.timestamp)
+          })
+        }
+        
+        meetings[meetingIndex].participants = Array.from(participants)
+        
+        chrome.storage.local.set({ meetings }, () => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message))
+          } else {
+            resolve()
+          }
+        })
+      } else {
+        reject(new Error('Meeting not found'))
+      }
+    })
+  })
+}
 
 async function handleCallEnded(reason: string, timestamp: string, tabId?: number): Promise<{ success: boolean }> {
   console.log('Call ended detected in background:', { reason, timestamp, tabId, currentMeetingId, recordingTabId })
