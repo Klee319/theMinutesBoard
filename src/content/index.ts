@@ -410,6 +410,12 @@ class TranscriptCapture {
     
     this.updateRecordingUI(true)
     
+    // 別タブで開くボタンを表示（記録開始時）
+    const openTabBtn = document.getElementById('minutes-open-tab')
+    if (openTabBtn) {
+      openTabBtn.style.display = 'flex'
+    }
+    
     this.observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (mutation.type === 'childList') {
@@ -440,30 +446,45 @@ class TranscriptCapture {
       this.observer = null
     }
     
+    // 別タブで開くボタンは表示したまま（停止後も押せるように）
+    // const openTabBtn = document.getElementById('minutes-open-tab')
+    // if (openTabBtn) {
+    //   openTabBtn.style.display = 'flex'  // 非表示にしない
+    // }
+    
     console.log('Recording stopped')
   }
 
   private setupCallStatusMonitoring() {
     // URLの変更を監視（ページ離脱検知）
     const currentUrl = window.location.href
-    console.log('Setting up call status monitoring for URL:', currentUrl)
+    const meetingId = currentUrl.split('/').pop() || ''
+    console.log('Setting up call status monitoring for URL:', currentUrl, 'Meeting ID:', meetingId)
     
     // ページが会議画面から離脱したか監視
     const checkUrl = () => {
       const newUrl = window.location.href
+      // 会議IDが変わった、またはmeet.google.comから離れた場合
       if (!newUrl.includes('meet.google.com') || 
-          (currentUrl.includes('/') && !newUrl.includes(currentUrl.split('/').pop() || ''))) {
+          (meetingId && !newUrl.includes(meetingId))) {
         console.log('URL changed, call likely ended:', newUrl)
         this.handleCallEnded('URL change detected')
       }
     }
     
     // URLの変更を定期的にチェック
-    setInterval(checkUrl, 2000)
+    const urlCheckInterval = setInterval(checkUrl, 1000)
+    
+    // popstateイベントでも監視（ブラウザの戻る/進むボタン）
+    window.addEventListener('popstate', () => {
+      console.log('Browser navigation detected')
+      checkUrl()
+    })
     
     // ページ離脱時のイベント監視
     window.addEventListener('beforeunload', () => {
       this.handleCallEnded('Page unload')
+      clearInterval(urlCheckInterval)
     })
     
     // 通話終了ボタンの監視
@@ -483,7 +504,12 @@ class TranscriptCapture {
       '[data-tooltip*="Leave call"]',
       '[data-tooltip*="End call"]',
       'button[aria-label*="離"]',
-      'button[data-tooltip*="離"]'
+      'button[data-tooltip*="離"]',
+      '[aria-label*="退出"]',
+      '[data-tooltip*="退出"]',
+      '[jsname="CQylAd"]', // 通話終了ボタンのjsname
+      '.VfPpkd-LgbsSe-OWXEXe-Bz112c-M1Soyc[aria-label*="call"]',
+      '.VfPpkd-LgbsSe-OWXEXe-Bz112c-M1Soyc[data-tooltip*="call"]'
     ]
     
     const checkCallEndButton = () => {
@@ -517,7 +543,11 @@ class TranscriptCapture {
       '[data-self-name]', // 自分の名前表示
       '[data-allocation-index]', // 参加者表示エリア
       '[role="main"]', // メイン会議エリア
-      '[jsname="VOlAQe"]' // Google Meet特有の会議エリア
+      '[jsname="VOlAQe"]', // Google Meet特有の会議エリア
+      '[jscontroller="IQKKlf"]', // 会議コントロール
+      '.z38b6', // 会議画面全体
+      '.crqnQb', // ビデオグリッド
+      '.Gv1mTb-aTv5jf' // 会議情報バー
     ]
     
     const checkMeetingElements = () => {
@@ -537,7 +567,36 @@ class TranscriptCapture {
     }
     
     // 定期的にチェック
-    setInterval(checkMeetingElements, 5000)
+    setInterval(checkMeetingElements, 3000)
+    
+    // MutationObserverでもメイン要素の削除を監視
+    this.callStatusObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {
+          // 重要な要素が削除されたかチェック
+          mutation.removedNodes.forEach((node) => {
+            if (node instanceof Element) {
+              for (const selector of criticalSelectors) {
+                if (node.matches(selector) || node.querySelector(selector)) {
+                  console.log('Important meeting element removed:', selector)
+                  // 少し待ってから再チェック（一時的な削除の可能性があるため）
+                  setTimeout(() => {
+                    checkMeetingElements()
+                  }, 1000)
+                  break
+                }
+              }
+            }
+          })
+        }
+      })
+    })
+    
+    // bodyタグを監視
+    this.callStatusObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    })
   }
 
   private setupParticipantsMonitoring() {
