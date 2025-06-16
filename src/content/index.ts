@@ -123,13 +123,26 @@ class TranscriptCapture {
           <span class="btn-text">別タブで開く</span>
         </button>
       </div>
-      <div id="minutes-content" class="minutes-content-area" style="display:none;">
-        <div id="minutes-loading" class="minutes-loading" style="display:none;">
-          <div class="spinner"></div>
-          <span class="loading-text">AIが処理中...</span>
+      <div class="tab-container">
+        <div class="tab-buttons">
+          <button id="minutes-tab" class="tab-btn active" data-tab="minutes">
+            議事録
+          </button>
+          <button id="nextsteps-tab" class="tab-btn" data-tab="nextsteps">
+            ネクストステップ
+          </button>
         </div>
-        <div id="minutes-text" class="minutes-text-display">
-          議事録を生成中...
+        <div id="minutes-content" class="tab-content minutes-content-area active">
+          <div id="minutes-loading" class="minutes-loading" style="display:none;">
+            <div class="spinner"></div>
+            <span class="loading-text">AIが処理中...</span>
+          </div>
+          <div id="minutes-text" class="minutes-text-display">
+            議事録を生成中...
+          </div>
+        </div>
+        <div id="nextsteps-content" class="tab-content nextsteps-content-area" style="display:none;">
+          <div id="nextsteps-panel"></div>
         </div>
       </div>
     `
@@ -181,6 +194,12 @@ class TranscriptCapture {
     openTabBtn?.addEventListener('click', () => {
       this.openInNewTab()
     })
+    
+    // タブ切り替え機能
+    this.setupTabSwitching()
+    
+    // ネクストステップパネルの初期化
+    this.initializeNextStepsPanel()
   }
   
   private setupPanelControls() {
@@ -1251,6 +1270,142 @@ class TranscriptCapture {
     }, 3000)
   }
 
+  private setupTabSwitching() {
+    const tabButtons = document.querySelectorAll('.tab-btn')
+    const tabContents = document.querySelectorAll('.tab-content')
+    
+    tabButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const targetTab = button.getAttribute('data-tab')
+        
+        // タブボタンのアクティブ状態を切り替え
+        tabButtons.forEach(btn => btn.classList.remove('active'))
+        button.classList.add('active')
+        
+        // タブコンテンツの表示を切り替え
+        tabContents.forEach(content => {
+          if (content.id === `${targetTab}-content`) {
+            content.style.display = 'block'
+            content.classList.add('active')
+          } else {
+            content.style.display = 'none'
+            content.classList.remove('active')
+          }
+        })
+      })
+    })
+  }
+
+  private initializeNextStepsPanel() {
+    // 動的にNextStepsPanelコンポーネントをインポートして初期化
+    const panelContainer = document.getElementById('nextsteps-panel')
+    if (!panelContainer) return
+    
+    // シンプルなネクストステップUIを作成
+    panelContainer.innerHTML = `
+      <div class="nextsteps-inner">
+        <div class="nextsteps-header">
+          <button id="generate-nextsteps" class="generate-btn">
+            <span class="icon">✨</span>
+            ネクストステップ生成
+          </button>
+        </div>
+        <div id="nextsteps-list" class="nextsteps-list">
+          <p class="empty-message">記録を開始してネクストステップを生成してください</p>
+        </div>
+      </div>
+    `
+    
+    // ネクストステップ生成ボタンのイベントリスナー
+    const generateBtn = document.getElementById('generate-nextsteps')
+    generateBtn?.addEventListener('click', () => {
+      this.generateNextSteps()
+    })
+  }
+
+  private async generateNextSteps() {
+    if (!this.currentMinutes) {
+      this.showNotification('先に議事録を生成してください', 'error')
+      return
+    }
+    
+    const generateBtn = document.getElementById('generate-nextsteps') as HTMLButtonElement
+    const listContainer = document.getElementById('nextsteps-list')
+    
+    if (!generateBtn || !listContainer) return
+    
+    // ローディング状態
+    generateBtn.disabled = true
+    generateBtn.innerHTML = '<span class="spinner"></span> 生成中...'
+    listContainer.innerHTML = '<div class="loading">ネクストステップを生成中...</div>'
+    
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'GENERATE_NEXTSTEPS',
+        payload: {
+          meetingId: this.currentMinutes.meetingId,
+          userPrompt: ''
+        }
+      })
+      
+      if (response.success && response.nextSteps) {
+        this.displayNextSteps(response.nextSteps)
+      } else {
+        throw new Error(response.error || 'ネクストステップの生成に失敗しました')
+      }
+    } catch (error) {
+      console.error('Error generating next steps:', error)
+      this.showNotification('ネクストステップの生成に失敗しました', 'error')
+      listContainer.innerHTML = '<p class="error-message">生成に失敗しました。もう一度お試しください。</p>'
+    } finally {
+      generateBtn.disabled = false
+      generateBtn.innerHTML = '<span class="icon">✨</span> ネクストステップ生成'
+    }
+  }
+
+  private displayNextSteps(nextSteps: any[]) {
+    const listContainer = document.getElementById('nextsteps-list')
+    if (!listContainer) return
+    
+    if (nextSteps.length === 0) {
+      listContainer.innerHTML = '<p class="empty-message">ネクストステップが見つかりませんでした</p>'
+      return
+    }
+    
+    listContainer.innerHTML = nextSteps.map(step => `
+      <div class="nextstep-item ${step.isPending ? 'pending' : ''} ${step.status === 'completed' ? 'completed' : ''}">
+        <div class="nextstep-header">
+          <span class="status-icon">${this.getStatusIcon(step.status)}</span>
+          <span class="task-text ${step.isPending ? 'text-red' : ''}">${step.task}</span>
+          ${step.priority ? `<span class="priority-badge priority-${step.priority}">${this.getPriorityLabel(step.priority)}</span>` : ''}
+        </div>
+        <div class="nextstep-meta">
+          ${step.assignee ? `<span class="assignee">👤 ${step.assignee}</span>` : ''}
+          ${step.dueDate ? `<span class="due-date">📅 ${new Date(step.dueDate).toLocaleDateString('ja-JP')}</span>` : ''}
+          ${step.notes ? `<span class="notes" title="${step.notes}">📝</span>` : ''}
+        </div>
+      </div>
+    `).join('')
+  }
+
+  private getStatusIcon(status: string): string {
+    switch (status) {
+      case 'pending': return '○'
+      case 'confirmed': return '●'
+      case 'in_progress': return '◐'
+      case 'completed': return '✓'
+      default: return '○'
+    }
+  }
+
+  private getPriorityLabel(priority: string): string {
+    switch (priority) {
+      case 'high': return '高'
+      case 'medium': return '中'
+      case 'low': return '低'
+      default: return ''
+    }
+  }
 
 }
 

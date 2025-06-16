@@ -450,3 +450,115 @@
   content: '📱';
   font-size: 14px;
 }
+
+/* タブ機能のスタイル */
+.tab-container {
+  @apply flex-1 flex flex-col overflow-hidden;
+}
+
+.tab-buttons {
+  @apply flex border-b border-gray-200 bg-gray-50;
+}
+
+.tab-btn {
+  @apply flex-1 px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors;
+  border: none;
+  background: none;
+  cursor: pointer;
+  outline: none;
+}
+
+.tab-btn.active {
+  @apply text-primary-600 bg-white;
+  border-bottom: 2px solid #3b82f6;
+}
+
+.tab-content {
+  @apply flex-1 overflow-y-auto;
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* ネクストステップパネルのスタイル */
+.nextsteps-content-area {
+  @apply p-4;
+}
+
+.nextsteps-inner {
+  @apply h-full flex flex-col;
+}
+
+.nextsteps-header {
+  @apply mb-4;
+}
+
+.generate-btn {
+  @apply w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2;
+}
+
+.nextsteps-list {
+  @apply flex-1 overflow-y-auto space-y-3;
+}
+
+.empty-message, .error-message {
+  @apply text-center text-gray-500 py-8;
+}
+
+.loading {
+  @apply text-center text-gray-600 py-8;
+}
+
+.nextstep-item {
+  @apply p-3 bg-gray-50 rounded-lg border border-gray-200 transition-all hover:shadow-sm;
+}
+
+.nextstep-item.pending {
+  @apply border-red-300 bg-red-50;
+}
+
+.nextstep-item.completed {
+  @apply opacity-50;
+}
+
+.nextstep-header {
+  @apply flex items-start gap-2;
+}
+
+.status-icon {
+  @apply text-lg leading-none mt-0.5;
+}
+
+.task-text {
+  @apply flex-1;
+}
+
+.task-text.text-red {
+  @apply text-red-600;
+}
+
+.priority-badge {
+  @apply px-2 py-0.5 text-xs font-semibold rounded;
+}
+
+.priority-badge.priority-high {
+  @apply bg-red-100 text-red-700;
+}
+
+.priority-badge.priority-medium {
+  @apply bg-yellow-100 text-yellow-700;
+}
+
+.priority-badge.priority-low {
+  @apply bg-gray-100 text-gray-700;
+}
+
+.nextstep-meta {
+  @apply mt-2 flex flex-wrap gap-3 text-xs text-gray-600;
+}
+
+.assignee, .due-date, .notes {
+  @apply flex items-center gap-1;
+}

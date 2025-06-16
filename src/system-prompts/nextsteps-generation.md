@@ -32,7 +32,7 @@ JSON形式で以下の構造で出力してください：
     {
       "task": "タスクの内容",
       "assignee": "担当者名（不明な場合は空文字）",
-      "dueDate": "期限（YYYY-MM-DD形式、不明な場合はnull）",
+      "dueDate": "期限（YYYY-MM-DD形式、不明な場合は未定）",
       "isPending": true/false（未確定かどうか）,
       "priority": "high/medium/low",
       "notes": "補足情報や背景",

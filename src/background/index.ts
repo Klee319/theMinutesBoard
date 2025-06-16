@@ -121,6 +121,33 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
           })
         return true
         
+      case 'GENERATE_NEXTSTEPS':
+        handleGenerateNextSteps(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error generating next steps:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
+      case 'UPDATE_NEXTSTEP':
+        handleUpdateNextStep(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error updating next step:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
+      case 'DELETE_NEXTSTEP':
+        handleDeleteNextStep(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error deleting next step:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
       case 'PARTICIPANT_UPDATE':
         handleParticipantUpdate(message.payload)
           .then(() => sendResponse({ success: true }))
@@ -603,5 +630,145 @@ async function handleCallEnded(reason: string, timestamp: string, tabId?: number
   } catch (error) {
     console.error('Error handling call end:', error)
     throw error
+  }
+}
+
+// ネクストステップ生成のハンドラー
+async function handleGenerateNextSteps(payload: any): Promise<any> {
+  const { meetingId, userPrompt } = payload || {}
+  
+  if (!meetingId) {
+    return { success: false, error: 'Meeting ID is required' }
+  }
+  
+  try {
+    // 会議データを取得
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meeting = meetings.find(m => m.id === meetingId)
+    if (!meeting) {
+      return { success: false, error: 'Meeting not found' }
+    }
+    
+    // 設定を取得
+    const settings = await new Promise<UserSettings>((resolve) => {
+      chrome.storage.local.get(['settings'], (result) => {
+        resolve(result.settings || {})
+      })
+    })
+    
+    // AIサービスを使用してネクストステップを生成
+    const aiService = AIServiceFactory.createService(settings)
+    const nextSteps = await aiService.generateNextSteps(meeting, userPrompt)
+    
+    // 生成されたネクストステップを会議データに追加
+    meeting.nextSteps = nextSteps
+    
+    // 会議データを保存
+    await new Promise<void>((resolve) => {
+      chrome.storage.local.set({ meetings }, () => {
+        resolve()
+      })
+    })
+    
+    // Content Scriptに通知
+    if (recordingTabId) {
+      chrome.tabs.sendMessage(recordingTabId, {
+        type: 'NEXTSTEPS_GENERATED',
+        payload: { meetingId, nextSteps }
+      })
+    }
+    
+    return { success: true, nextSteps }
+  } catch (error) {
+    console.error('Error generating next steps:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+// ネクストステップ更新のハンドラー
+async function handleUpdateNextStep(payload: any): Promise<any> {
+  const { meetingId, nextStepId, updates } = payload || {}
+  
+  if (!meetingId || !nextStepId) {
+    return { success: false, error: 'Meeting ID and NextStep ID are required' }
+  }
+  
+  try {
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meeting = meetings.find(m => m.id === meetingId)
+    if (!meeting || !meeting.nextSteps) {
+      return { success: false, error: 'Meeting or nextSteps not found' }
+    }
+    
+    const nextStepIndex = meeting.nextSteps.findIndex(ns => ns.id === nextStepId)
+    if (nextStepIndex === -1) {
+      return { success: false, error: 'NextStep not found' }
+    }
+    
+    // 更新を適用
+    meeting.nextSteps[nextStepIndex] = {
+      ...meeting.nextSteps[nextStepIndex],
+      ...updates,
+      updatedAt: new Date()
+    }
+    
+    // 保存
+    await new Promise<void>((resolve) => {
+      chrome.storage.local.set({ meetings }, () => {
+        resolve()
+      })
+    })
+    
+    return { success: true, nextStep: meeting.nextSteps[nextStepIndex] }
+  } catch (error) {
+    console.error('Error updating next step:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+// ネクストステップ削除のハンドラー
+async function handleDeleteNextStep(payload: any): Promise<any> {
+  const { meetingId, nextStepId } = payload || {}
+  
+  if (!meetingId || !nextStepId) {
+    return { success: false, error: 'Meeting ID and NextStep ID are required' }
+  }
+  
+  try {
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meeting = meetings.find(m => m.id === meetingId)
+    if (!meeting || !meeting.nextSteps) {
+      return { success: false, error: 'Meeting or nextSteps not found' }
+    }
+    
+    // フィルタリングして削除
+    meeting.nextSteps = meeting.nextSteps.filter(ns => ns.id !== nextStepId)
+    
+    // 保存
+    await new Promise<void>((resolve) => {
+      chrome.storage.local.set({ meetings }, () => {
+        resolve()
+      })
+    })
+    
+    return { success: true }
+  } catch (error) {
+    console.error('Error deleting next step:', error)
+    return { success: false, error: error.message }
   }
 }
