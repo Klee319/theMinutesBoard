@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Meeting, Minutes, Transcript } from '@/types'
+import ChatPanel from '@/components/ChatPanel'
 
 function App() {
   const [currentMeeting, setCurrentMeeting] = useState<Meeting | null>(null)
@@ -10,6 +11,8 @@ function App() {
   const [isDownloadDropdownOpen, setIsDownloadDropdownOpen] = useState(false)
   const [isMinutesGenerating, setIsMinutesGenerating] = useState(false)
   const [currentTab, setCurrentTab] = useState<'history' | 'nextsteps'>('history')
+  const [showChatPanel, setShowChatPanel] = useState(true)
+  const [showNextStepsPanel, setShowNextStepsPanel] = useState(true)
 
   useEffect(() => {
     console.log('Initial useEffect - loading data')
@@ -417,192 +420,306 @@ function App() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto p-4">
-        <div className="grid grid-cols-12 gap-6">
-          {/* サイドバー（履歴モード時のみ表示） */}
-          {console.log('Sidebar render check - isLiveMode:', isLiveMode, 'currentTab:', currentTab, 'allMeetings:', allMeetings.length)}
-          {!isLiveMode && currentTab === 'history' && (
-            <div className="col-span-3">
-              <div className="bg-white rounded-lg shadow-sm p-4">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">会議履歴</h2>
-                <div className="space-y-2">
-                  {console.log('Rendering meetings list, count:', allMeetings.length)}
-                  {console.log('All meetings data:', allMeetings)}
-                  {allMeetings.length === 0 ? (
-                    <p className="text-sm text-gray-500 text-center py-4">
-                      まだ会議の記録がありません
-                    </p>
-                  ) : (
-                    <>
-                    <p className="text-xs text-gray-600 mb-2">
-                      {allMeetings.length}件の会議があります
-                    </p>
-                    {allMeetings
-                    .filter((meeting) => {
-                      // Invalid Dateを除外
-                      try {
-                        // startTimeがオブジェクトの場合の処理
-                        let startTime = meeting.startTime
-                        if (typeof startTime === 'object' && startTime !== null && !(startTime instanceof Date)) {
-                          // Firestoreタイムスタンプ形式の可能性
-                          if ('seconds' in startTime || '_seconds' in startTime) {
-                            const seconds = startTime.seconds || startTime._seconds
-                            startTime = new Date(seconds * 1000)
-                          } else if ('toDate' in startTime && typeof startTime.toDate === 'function') {
-                            startTime = startTime.toDate()
-                          } else {
-                            // その他のオブジェクト形式
-                            console.log('Unknown date object format:', meeting.id, startTime)
-                            return true // とりあえず表示する
-                          }
-                        }
-                        const date = new Date(startTime)
-                        const isValid = !isNaN(date.getTime())
-                        if (!isValid) {
-                          console.log('Invalid date for meeting:', meeting.id, meeting.startTime)
-                        }
-                        return true // 日付が無効でも表示する
-                      } catch (e) {
-                        console.error('Date processing error:', e)
-                        return true
-                      }
-                    })
-                    .sort((a, b) => {
-                      try {
-                        // 簡易的にtitleの日付文字列でソート
-                        return b.title.localeCompare(a.title)
-                      } catch (e) {
-                        return 0
-                      }
-                    })
-                    .map((meeting) => {
-                      console.log('Rendering meeting item:', meeting.id, meeting.title)
-                      return (
-                      <div
-                        key={meeting.id}
-                        onClick={() => handleMeetingSelect(meeting)}
-                        className={`p-3 rounded-lg cursor-pointer transition-colors ${
-                          selectedMeeting?.id === meeting.id
-                            ? 'bg-blue-50 border border-blue-200'
-                            : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        <div>
-                          {meeting.minutes && (
-                            <p className="text-sm font-medium text-gray-900 mb-1" title={extractMeetingTopic(meeting.minutes.content)}>
-                              {extractMeetingTopic(meeting.minutes.content)}
-                            </p>
-                          )}
-                          <p className="text-xs text-gray-600">
-                            {meeting.title || 'Unknown date'}
-                          </p>
-                        </div>
-                      </div>
-                    )})}
-                    </>
-                  )}
+      <div className="max-w-full mx-auto p-4">
+        <div className="flex gap-4 h-[calc(100vh-120px)]">
+          {/* ネクストステップパネル（左） */}
+          {showNextStepsPanel && displayMeeting && (
+            <div className="w-80 flex-shrink-0">
+              <div className="bg-white rounded-lg shadow-sm p-4 h-full flex flex-col">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900">ネクストステップ</h2>
+                  <button
+                    onClick={() => setShowNextStepsPanel(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <div className="text-center py-8">
+                    <div className="text-4xl mb-4">📋</div>
+                    <p className="text-sm text-gray-600">ネクストステップ機能は準備中です</p>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* メインコンテンツ */}
-          <div className={isLiveMode ? 'col-span-12' : currentTab === 'history' ? 'col-span-9' : 'col-span-12'}>
-            
-            {/* ネクストステップタブの内容 */}
-            {!isLiveMode && currentTab === 'nextsteps' && (
-              <div className="bg-white rounded-lg shadow-sm p-12 text-center">
-                <div className="text-6xl mb-4">📋</div>
-                <p className="text-xl text-gray-600 mb-4">ネクストステップ機能は準備中です</p>
-                <p className="text-gray-500">会議の決定事項から次のアクションを管理できるようになります</p>
-              </div>
-            )}
-            
-            {/* 履歴タブまたはライブ表示の内容 */}
-            {(isLiveMode || currentTab === 'history') && displayMeeting ? (
-              <div className="bg-white rounded-lg shadow-sm">
-                {/* 会議情報ヘッダー */}
-                <div className="p-6 border-b">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                        {displayMeeting.title}
-                      </h2>
-                      <div className="flex items-center gap-4 text-sm text-gray-600">
-                        {displayMeeting.participants && (
-                          <span>参加者: {displayMeeting.participants.length}名</span>
-                        )}
-                        {displayMeeting.transcripts && (
-                          <span>発言数: {displayMeeting.transcripts.length}件</span>
-                        )}
-                        {isLiveMode && lastUpdated && (
-                          <span>最終更新: {lastUpdated.toLocaleTimeString()}</span>
-                        )}
-                      </div>
+          {/* メインコンテンツ（中央） */}
+          <div className="flex-1 min-w-0">
+            {/* 履歴サイドバー */}
+            {!isLiveMode && currentTab === 'history' && (
+              <div className="flex gap-4 h-full">
+                <div className="w-64 flex-shrink-0">
+                  <div className="bg-white rounded-lg shadow-sm p-4 h-full overflow-y-auto">
+                    <h2 className="text-lg font-semibold text-gray-900 mb-4">会議履歴</h2>
+                    <div className="space-y-2">
+                      {allMeetings.length === 0 ? (
+                        <p className="text-sm text-gray-500 text-center py-4">
+                          まだ会議の記録がありません
+                        </p>
+                      ) : (
+                        <>
+                        <p className="text-xs text-gray-600 mb-2">
+                          {allMeetings.length}件の会議があります
+                        </p>
+                        {allMeetings
+                        .sort((a, b) => {
+                          try {
+                            return b.title.localeCompare(a.title)
+                          } catch (e) {
+                            return 0
+                          }
+                        })
+                        .map((meeting) => (
+                          <div
+                            key={meeting.id}
+                            onClick={() => handleMeetingSelect(meeting)}
+                            className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                              selectedMeeting?.id === meeting.id
+                                ? 'bg-blue-50 border border-blue-200'
+                                : 'hover:bg-gray-50'
+                            }`}
+                          >
+                            <div>
+                              {meeting.minutes && (
+                                <p className="text-sm font-medium text-gray-900 mb-1" title={extractMeetingTopic(meeting.minutes.content)}>
+                                  {extractMeetingTopic(meeting.minutes.content)}
+                                </p>
+                              )}
+                              <p className="text-xs text-gray-600">
+                                {meeting.title || 'Unknown date'}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                        </>
+                      )}
                     </div>
-                    
-                    {isLiveMode && (
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1">
-                          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                          <span className="text-sm text-red-600 font-medium">記録中</span>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
 
-                {/* 議事録コンテンツ */}
-                <div className="p-6">
-                  {displayMeeting.minutes ? (
-                    <div className="prose prose-lg max-w-none">
-                      <div dangerouslySetInnerHTML={{ 
-                        __html: formatMarkdownToHTML(displayMeeting.minutes.content) 
-                      }} />
+                {/* メインコンテンツエリア */}
+                <div className="flex-1">
+                  {displayMeeting ? (
+                    <div className="bg-white rounded-lg shadow-sm h-full">
+                      {/* 会議情報ヘッダー */}
+                      <div className="p-6 border-b">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                              {displayMeeting.title}
+                            </h2>
+                            <div className="flex items-center gap-4 text-sm text-gray-600">
+                              {displayMeeting.participants && (
+                                <span>参加者: {displayMeeting.participants.length}名</span>
+                              )}
+                              {displayMeeting.transcripts && (
+                                <span>発言数: {displayMeeting.transcripts.length}件</span>
+                              )}
+                              {isLiveMode && lastUpdated && (
+                                <span>最終更新: {lastUpdated.toLocaleTimeString()}</span>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {isLiveMode && (
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1">
+                                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                                <span className="text-sm text-red-600 font-medium">記録中</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 議事録コンテンツ */}
+                      <div className="p-6 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+                        {displayMeeting.minutes ? (
+                          <div className="prose prose-lg max-w-none">
+                            <div dangerouslySetInnerHTML={{ 
+                              __html: formatMarkdownToHTML(displayMeeting.minutes.content) 
+                            }} />
+                          </div>
+                        ) : (
+                          <div className="text-center py-12">
+                            <div className="text-6xl mb-4">📝</div>
+                            <p className="text-xl text-gray-600 mb-4">議事録がまだ生成されていません</p>
+                            {isLiveMode && currentMeeting && (
+                              <button
+                                onClick={generateMinutes}
+                                disabled={isMinutesGenerating}
+                                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center gap-2 mx-auto"
+                              >
+                                {isMinutesGenerating ? (
+                                  <>
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    <span>生成中...</span>
+                                  </>
+                                ) : (
+                                  '✨ 議事録を生成する'
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ) : (
-                    <div className="text-center py-12">
-                      <div className="text-6xl mb-4">📝</div>
-                      <p className="text-xl text-gray-600 mb-4">議事録がまだ生成されていません</p>
-                      {isLiveMode && currentMeeting && (
-                        <button
-                          onClick={generateMinutes}
-                          disabled={isMinutesGenerating}
-                          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center gap-2 mx-auto"
-                        >
-                          {isMinutesGenerating ? (
-                            <>
-                              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                              <span>生成中...</span>
-                            </>
-                          ) : (
-                            '✨ 議事録を生成する'
-                          )}
-                        </button>
-                      )}
+                    <div className="bg-white rounded-lg shadow-sm p-12 text-center h-full flex items-center justify-center">
+                      <div>
+                        <div className="text-6xl mb-4">📚</div>
+                        <p className="text-xl text-gray-600 mb-4">会議を選択してください</p>
+                        <p className="text-gray-500">左側のリストから表示したい会議を選んでください</p>
+                      </div>
                     </div>
                   )}
                 </div>
               </div>
-            ) : (isLiveMode || currentTab === 'history') ? (
-              <div className="bg-white rounded-lg shadow-sm p-12 text-center">
-                {isLiveMode ? (
-                  <>
-                    <div className="text-6xl mb-4">📹</div>
-                    <p className="text-xl text-gray-600 mb-4">記録中の会議がありません</p>
-                    <p className="text-gray-500">Google Meetで記録を開始してください</p>
-                  </>
+            )}
+
+            {/* ライブモードまたはネクストステップタブ */}
+            {(isLiveMode || (!isLiveMode && currentTab === 'nextsteps')) && (
+              <div className="flex-1">
+                {displayMeeting ? (
+                  <div className="bg-white rounded-lg shadow-sm h-full">
+                    {/* 会議情報ヘッダー */}
+                    <div className="p-6 border-b">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                            {displayMeeting.title}
+                          </h2>
+                          <div className="flex items-center gap-4 text-sm text-gray-600">
+                            {displayMeeting.participants && (
+                              <span>参加者: {displayMeeting.participants.length}名</span>
+                            )}
+                            {displayMeeting.transcripts && (
+                              <span>発言数: {displayMeeting.transcripts.length}件</span>
+                            )}
+                            {isLiveMode && lastUpdated && (
+                              <span>最終更新: {lastUpdated.toLocaleTimeString()}</span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {isLiveMode && (
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1">
+                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                              <span className="text-sm text-red-600 font-medium">記録中</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 議事録コンテンツ */}
+                    <div className="p-6 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+                      {displayMeeting.minutes ? (
+                        <div className="prose prose-lg max-w-none">
+                          <div dangerouslySetInnerHTML={{ 
+                            __html: formatMarkdownToHTML(displayMeeting.minutes.content) 
+                          }} />
+                        </div>
+                      ) : (
+                        <div className="text-center py-12">
+                          <div className="text-6xl mb-4">📝</div>
+                          <p className="text-xl text-gray-600 mb-4">議事録がまだ生成されていません</p>
+                          {isLiveMode && currentMeeting && (
+                            <button
+                              onClick={generateMinutes}
+                              disabled={isMinutesGenerating}
+                              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center gap-2 mx-auto"
+                            >
+                              {isMinutesGenerating ? (
+                                <>
+                                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                  <span>生成中...</span>
+                                </>
+                              ) : (
+                                '✨ 議事録を生成する'
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ) : (
-                  <>
-                    <div className="text-6xl mb-4">📚</div>
-                    <p className="text-xl text-gray-600 mb-4">会議を選択してください</p>
-                    <p className="text-gray-500">左側のリストから表示したい会議を選んでください</p>
-                  </>
+                  <div className="bg-white rounded-lg shadow-sm p-12 text-center h-full flex items-center justify-center">
+                    {isLiveMode ? (
+                      <div>
+                        <div className="text-6xl mb-4">📹</div>
+                        <p className="text-xl text-gray-600 mb-4">記録中の会議がありません</p>
+                        <p className="text-gray-500">Google Meetで記録を開始してください</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-6xl mb-4">📋</div>
+                        <p className="text-xl text-gray-600 mb-4">ネクストステップ機能は準備中です</p>
+                        <p className="text-gray-500">会議の決定事項から次のアクションを管理できるようになります</p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-            ) : null}
+            )}
           </div>
+
+          {/* AIチャットパネル（右） */}
+          {showChatPanel && displayMeeting && (
+            <div className="w-80 flex-shrink-0">
+              <div className="bg-white rounded-lg shadow-sm h-full">
+                <div className="flex items-center justify-between p-4 border-b">
+                  <h2 className="text-lg font-semibold text-gray-900">AIチャット</h2>
+                  <button
+                    onClick={() => setShowChatPanel(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="h-[calc(100%-60px)]">
+                  <ChatPanel meeting={displayMeeting} isLiveMode={isLiveMode} />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
+
+        {/* 非表示パネルの再表示ボタン */}
+        {displayMeeting && (!showNextStepsPanel || !showChatPanel) && (
+          <div className="fixed bottom-4 right-4 flex gap-2">
+            {!showNextStepsPanel && (
+              <button
+                onClick={() => setShowNextStepsPanel(true)}
+                className="px-4 py-2 bg-white rounded-lg shadow-lg hover:shadow-xl transition-shadow flex items-center gap-2 text-sm"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                ネクストステップ
+              </button>
+            )}
+            {!showChatPanel && (
+              <button
+                onClick={() => setShowChatPanel(true)}
+                className="px-4 py-2 bg-white rounded-lg shadow-lg hover:shadow-xl transition-shadow flex items-center gap-2 text-sm"
+              >
+                AIチャット
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

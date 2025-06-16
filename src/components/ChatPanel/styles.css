@@ -1,0 +1,28 @@
+/* ChatPanel specific styles */
+.chat-panel-container {
+  @apply h-full flex flex-col bg-white rounded-lg shadow-sm;
+}
+
+.chat-messages {
+  @apply flex-1 overflow-y-auto p-4 space-y-4;
+}
+
+.chat-input-container {
+  @apply border-t p-4;
+}
+
+.chat-message-user {
+  @apply bg-blue-600 text-white;
+}
+
+.chat-message-assistant {
+  @apply bg-gray-100 text-gray-800;
+}
+
+.chat-loading-dots {
+  @apply flex items-center gap-2;
+}
+
+.chat-loading-dot {
+  @apply w-2 h-2 bg-gray-400 rounded-full animate-bounce;
+}
