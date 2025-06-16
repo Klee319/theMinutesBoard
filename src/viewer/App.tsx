@@ -13,10 +13,29 @@ function App() {
   const [currentTab, setCurrentTab] = useState<'history' | 'nextsteps'>('history')
   const [showChatPanel, setShowChatPanel] = useState(true)
   const [showNextStepsPanel, setShowNextStepsPanel] = useState(true)
+  const [isMobile, setIsMobile] = useState(false)
+  const [activePanel, setActivePanel] = useState<'nextsteps' | 'main' | 'chat'>('main')
 
   useEffect(() => {
     console.log('Initial useEffect - loading data')
     loadData()
+    
+    // モバイル判定
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+      // モバイル時はパネルを非表示
+      if (window.innerWidth < 768) {
+        setShowChatPanel(false)
+        setShowNextStepsPanel(false)
+      }
+    }
+    
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    
+    return () => {
+      window.removeEventListener('resize', checkMobile)
+    }
     
     // URLパラメータから会議IDを取得
     const urlParams = new URLSearchParams(window.location.search)
@@ -420,17 +439,53 @@ function App() {
         </div>
       </div>
 
-      <div className="max-w-full mx-auto p-4">
-        <div className="flex gap-4 h-[calc(100vh-120px)]">
+      <div className="max-w-full mx-auto p-2 md:p-4">
+        {/* モバイル用タブ */}
+        {isMobile && displayMeeting && (
+          <div className="flex border-b mb-2 md:hidden">
+            <button
+              onClick={() => setActivePanel('nextsteps')}
+              className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
+                activePanel === 'nextsteps'
+                  ? 'bg-blue-50 text-blue-800 border-b-2 border-blue-500'
+                  : 'text-gray-600'
+              }`}
+            >
+              ネクストステップ
+            </button>
+            <button
+              onClick={() => setActivePanel('main')}
+              className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
+                activePanel === 'main'
+                  ? 'bg-blue-50 text-blue-800 border-b-2 border-blue-500'
+                  : 'text-gray-600'
+              }`}
+            >
+              議事録
+            </button>
+            <button
+              onClick={() => setActivePanel('chat')}
+              className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
+                activePanel === 'chat'
+                  ? 'bg-blue-50 text-blue-800 border-b-2 border-blue-500'
+                  : 'text-gray-600'
+              }`}
+            >
+              チャット
+            </button>
+          </div>
+        )}
+        
+        <div className="flex gap-4 h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
           {/* ネクストステップパネル（左） */}
-          {showNextStepsPanel && displayMeeting && (
-            <div className="w-80 flex-shrink-0">
+          {((showNextStepsPanel && !isMobile) || (isMobile && activePanel === 'nextsteps')) && displayMeeting && (
+            <div className={`${isMobile ? 'w-full' : 'w-80 flex-shrink-0'} ${isMobile && activePanel !== 'nextsteps' ? 'hidden' : ''}`}>
               <div className="bg-white rounded-lg shadow-sm p-4 h-full flex flex-col">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-gray-900">ネクストステップ</h2>
                   <button
-                    onClick={() => setShowNextStepsPanel(false)}
-                    className="text-gray-400 hover:text-gray-600"
+                    onClick={() => isMobile ? setActivePanel('main') : setShowNextStepsPanel(false)}
+                    className="text-gray-400 hover:text-gray-600 md:block"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -448,12 +503,12 @@ function App() {
           )}
 
           {/* メインコンテンツ（中央） */}
-          <div className="flex-1 min-w-0">
+          <div className={`flex-1 min-w-0 ${isMobile && activePanel !== 'main' ? 'hidden' : ''}`}>
             {/* 履歴サイドバー */}
             {!isLiveMode && currentTab === 'history' && (
-              <div className="flex gap-4 h-full">
-                <div className="w-64 flex-shrink-0">
-                  <div className="bg-white rounded-lg shadow-sm p-4 h-full overflow-y-auto">
+              <div className="flex flex-col md:flex-row gap-4 h-full">
+                <div className="w-full md:w-64 flex-shrink-0">
+                  <div className="bg-white rounded-lg shadow-sm p-4 h-full md:h-full overflow-y-auto">
                     <h2 className="text-lg font-semibold text-gray-900 mb-4">会議履歴</h2>
                     <div className="space-y-2">
                       {allMeetings.length === 0 ? (
@@ -671,13 +726,13 @@ function App() {
           </div>
 
           {/* AIチャットパネル（右） */}
-          {showChatPanel && displayMeeting && (
-            <div className="w-80 flex-shrink-0">
+          {((showChatPanel && !isMobile) || (isMobile && activePanel === 'chat')) && displayMeeting && (
+            <div className={`${isMobile ? 'w-full' : 'w-80 flex-shrink-0'} ${isMobile && activePanel !== 'chat' ? 'hidden' : ''}`}>
               <div className="bg-white rounded-lg shadow-sm h-full">
                 <div className="flex items-center justify-between p-4 border-b">
                   <h2 className="text-lg font-semibold text-gray-900">AIチャット</h2>
                   <button
-                    onClick={() => setShowChatPanel(false)}
+                    onClick={() => isMobile ? setActivePanel('main') : setShowChatPanel(false)}
                     className="text-gray-400 hover:text-gray-600"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -693,8 +748,8 @@ function App() {
           )}
         </div>
 
-        {/* 非表示パネルの再表示ボタン */}
-        {displayMeeting && (!showNextStepsPanel || !showChatPanel) && (
+        {/* 非表示パネルの再表示ボタン（デスクトップのみ） */}
+        {!isMobile && displayMeeting && (!showNextStepsPanel || !showChatPanel) && (
           <div className="fixed bottom-4 right-4 flex gap-2">
             {!showNextStepsPanel && (
               <button

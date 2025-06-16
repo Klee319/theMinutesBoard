@@ -145,12 +145,12 @@ function App() {
   }
   
   return (
-    <div className="w-96 p-4">
+    <div className="w-full min-w-[320px] max-w-[400px] p-4">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-gray-800">theMinutesBoard</h1>
+        <h1 className="text-lg md:text-xl font-bold text-gray-800">theMinutesBoard</h1>
         <button
           onClick={handleOpenOptions}
-          className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium"
+          className="flex items-center gap-1 md:gap-2 px-2 md:px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium"
           title="設定"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -240,7 +240,7 @@ function App() {
             const url = chrome.runtime.getURL('src/viewer/viewer.html?mode=history')
             chrome.tabs.create({ url })
           }}
-          className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 font-medium"
+          className="w-full px-4 py-2 md:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 font-medium text-sm md:text-base"
         >
           <span>📋</span>
           <span>履歴・ToDo確認</span>
