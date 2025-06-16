@@ -1,5 +1,10 @@
-const { readFileSync, writeFileSync, readdirSync } = require('fs')
-const { join, basename } = require('path')
+import { readFileSync, writeFileSync, readdirSync } from 'fs'
+import { join, basename } from 'path'
+import { fileURLToPath } from 'url'
+import { dirname } from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 // マークダウンファイルを読み込んでTypeScript定数として生成
 function generateSystemPrompts() {

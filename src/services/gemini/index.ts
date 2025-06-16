@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { Transcript, Minutes, UserSettings } from '@/types'
+import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
 import { BaseAIService } from '../ai/base'
 
 export class GeminiService extends BaseAIService {
@@ -202,6 +202,28 @@ ${formattedTranscript}
 
   // この関数は削除（base.tsのformatTranscriptsEnhancedを使用）
 
+  async generateNextSteps(meeting: Meeting, userPrompt?: string): Promise<NextStep[]> {
+    if (!this.model && this.apiKey) {
+      this.initialize(this.apiKey)
+    }
+    
+    if (!this.model) {
+      throw new Error('Gemini API key not configured')
+    }
+
+    const prompt = this.buildNextStepsPrompt(meeting, userPrompt)
+    
+    try {
+      const result = await this.model.generateContent(prompt)
+      const response = await result.response
+      const content = response.text()
+      
+      return this.parseNextStepsResponse(content, meeting.id)
+    } catch (error) {
+      console.error('Failed to generate next steps:', error)
+      throw new Error('ネクストステップの生成に失敗しました')
+    }
+  }
 }
 
 export const geminiService = new GeminiService()

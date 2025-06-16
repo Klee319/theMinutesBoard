@@ -443,7 +443,7 @@ function App() {
                       try {
                         // startTimeがオブジェクトの場合の処理
                         let startTime = meeting.startTime
-                        if (typeof startTime === 'object' && startTime !== null && !startTime instanceof Date) {
+                        if (typeof startTime === 'object' && startTime !== null && !(startTime instanceof Date)) {
                           // Firestoreタイムスタンプ形式の可能性
                           if ('seconds' in startTime || '_seconds' in startTime) {
                             const seconds = startTime.seconds || startTime._seconds

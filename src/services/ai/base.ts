@@ -1,5 +1,5 @@
-import { Transcript, Minutes, UserSettings } from '@/types'
-import { MINUTES_GENERATION_PROMPT } from '@/system-prompts'
+import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
+import { MINUTES_GENERATION_PROMPT, NEXTSTEPS_GENERATION_PROMPT } from '@/system-prompts'
 
 export abstract class BaseAIService {
   protected apiKey: string
@@ -24,6 +24,12 @@ export abstract class BaseAIService {
 
   // AIアシスタント用の汎用コンテンツ生成メソッド
   abstract generateContent(prompt: string, modelId?: string): Promise<string>
+
+  // ネクストステップ生成メソッド
+  abstract generateNextSteps(
+    meeting: Meeting,
+    userPrompt?: string
+  ): Promise<NextStep[]>
 
   protected calculateDuration(transcripts: Transcript[]): number {
     if (transcripts.length === 0) return 0
@@ -133,5 +139,86 @@ export abstract class BaseAIService {
     }
     
     return combinedPrompt
+  }
+
+  // ネクストステップ生成用のプロンプトを構築
+  protected buildNextStepsPrompt(meeting: Meeting, userPrompt?: string): string {
+    let prompt = NEXTSTEPS_GENERATION_PROMPT
+
+    // プレースホルダーの置換
+    prompt = prompt.replace('{{startTime}}', meeting.startTime.toLocaleString('ja-JP'))
+    prompt = prompt.replace('{{participants}}', meeting.participants.join(', '))
+    
+    const duration = meeting.duration || this.calculateDuration(meeting.transcripts)
+    const hours = Math.floor(duration / 3600)
+    const minutes = Math.floor((duration % 3600) / 60)
+    const durationText = `${hours > 0 ? `${hours}時間` : ''}${minutes}分`
+    prompt = prompt.replace('{{duration}}', durationText)
+
+    // 発言記録の整形
+    const transcriptsText = this.formatTranscriptsForNextSteps(meeting.transcripts)
+    prompt = prompt.replace('{{transcripts}}', transcriptsText)
+
+    // ユーザープロンプトの追加
+    if (userPrompt && userPrompt.trim()) {
+      prompt += '\n\n## 追加の指示\n\n' + userPrompt
+    }
+
+    return prompt
+  }
+
+  // ネクストステップ抽出用の発言記録整形
+  protected formatTranscriptsForNextSteps(transcripts: Transcript[]): string {
+    return transcripts
+      .sort((a, b) => {
+        const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime()
+        const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime()
+        return aTime - bTime
+      })
+      .map(t => {
+        const timestamp = t.timestamp instanceof Date ? t.timestamp : new Date(t.timestamp)
+        const time = timestamp.toLocaleTimeString('ja-JP', { 
+          hour: '2-digit', 
+          minute: '2-digit'
+        })
+        return `[${time}] ${t.speaker}: ${t.content} (ID: ${t.id})`
+      })
+      .join('\n')
+  }
+
+  // AI応答をNextStep配列に変換
+  protected parseNextStepsResponse(response: string, meetingId: string): NextStep[] {
+    try {
+      const jsonMatch = response.match(/```json\n?([\s\S]*?)\n?```/)
+      const jsonStr = jsonMatch ? jsonMatch[1] : response
+      const parsed = JSON.parse(jsonStr)
+      
+      if (!parsed.nextSteps || !Array.isArray(parsed.nextSteps)) {
+        throw new Error('Invalid response format')
+      }
+
+      return parsed.nextSteps.map((item: any) => ({
+        id: this.generateId(),
+        meetingId,
+        task: item.task || '',
+        assignee: item.assignee || undefined,
+        dueDate: item.dueDate ? new Date(item.dueDate) : undefined,
+        status: item.isPending ? 'pending' : 'confirmed',
+        isPending: item.isPending || false,
+        priority: item.priority || 'medium',
+        dependencies: [],
+        notes: item.notes || '',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }))
+    } catch (error) {
+      console.error('Failed to parse NextSteps response:', error)
+      return []
+    }
+  }
+
+  // ランダムIDの生成
+  protected generateId(): string {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2)
   }
 }

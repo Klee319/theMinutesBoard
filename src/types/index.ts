@@ -15,6 +15,8 @@ export interface Meeting {
   transcripts: Transcript[]
   minutes?: Minutes
   callEndReason?: string
+  duration?: number // 会議時間（秒）
+  nextSteps?: NextStep[] // ネクストステップ追加
 }
 
 export interface Minutes {
@@ -95,11 +97,16 @@ export type MessageType =
   | 'PARTICIPANT_UPDATE'
   | 'RECORDING_STOPPED'
   | 'RESTORE_SESSION'
+  | 'GENERATE_NEXTSTEPS'
+  | 'UPDATE_NEXTSTEP'
+  | 'DELETE_NEXTSTEP'
+  | 'NEXTSTEPS_GENERATED'
 
 export interface StorageData {
   meetings: Meeting[]
   settings: UserSettings
   currentMeetingId?: string
+  nextStepsPrompt?: string // ネクストステップ生成用プロンプト
 }
 
 export interface AIResponse {
@@ -138,4 +145,20 @@ export interface KeywordDetection {
   timestamp: Date
   confidence: number
   extractedRequest?: string
+}
+
+// ネクストステップ型（新規追加）
+export interface NextStep {
+  id: string
+  meetingId: string
+  task: string
+  assignee?: string
+  dueDate?: Date
+  status: 'pending' | 'confirmed' | 'in_progress' | 'completed'
+  isPending: boolean // 未確定項目フラグ（赤字表示用）
+  priority?: 'high' | 'medium' | 'low'
+  dependencies: string[] // 他のタスクID
+  notes: string
+  createdAt: Date
+  updatedAt: Date
 }

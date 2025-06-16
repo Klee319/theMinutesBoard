@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Codebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.
+
 ## 共通規則
 
 Always respond in Japanese
@@ -95,7 +97,7 @@ Always respond in Japanese
 - **依存モジュール情報**: トラブル解決に必要な最小限のみ保持
 - **ライブラリドキュメント**: 基本的にコンテキストに含めない
 - **問題解決後**: 依存関係の詳細情報は即座に破棄
-- **必要時検索**: 具体的な問題発生時にweb_searchで最新情報を取得
+- **必要時検索**: 具体的な問題発生時・技術スタック検討時にweb_searchで最新情報を取得
 ###### 保持すべき情報
 
 - **requirements.txt**: バージョン情報のみ
@@ -164,6 +166,11 @@ Always respond in Japanese
 - `/readme`:README.mdの現在仕様に合わせた更新
 - `/opt`: パフォーマンス最適化の検討
 
-
-
+※：あなたはLinuxの実環境ではなくWindows内でDockerを用いて実行されていることに留意
   
+  
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
