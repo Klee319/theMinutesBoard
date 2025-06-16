@@ -132,4 +132,68 @@ ${formattedTranscript}
 - 重要な決定事項は**太字**で強調してください
 - アクションアイテムがある場合は明確にリストアップしてください`
   }
+
+  async sendChatMessage(
+    message: string,
+    context: any
+  ): Promise<string> {
+    try {
+      const messages = []
+      
+      // システムプロンプトを設定
+      if (context.systemPrompt) {
+        messages.push({
+          role: 'system',
+          content: context.systemPrompt
+        })
+      }
+      
+      // コンテキスト情報を追加
+      let contextMessage = '【現在の会議情報】\n'
+      contextMessage += `タイトル: ${context.meetingInfo.title}\n`
+      contextMessage += `参加者: ${context.meetingInfo.participants.join(', ')}\n`
+      contextMessage += `発言数: ${context.meetingInfo.transcriptsCount}\n\n`
+      
+      if (context.minutes) {
+        contextMessage += '【現在の議事録】\n' + context.minutes + '\n\n'
+      }
+      
+      if (context.recentTranscripts && context.recentTranscripts.length > 0) {
+        contextMessage += '【最近の発言】\n'
+        context.recentTranscripts.forEach((t: Transcript) => {
+          const time = new Date(t.timestamp).toLocaleTimeString('ja-JP')
+          contextMessage += `[${time}] ${t.speaker}: ${t.content}\n`
+        })
+      }
+      
+      messages.push({
+        role: 'user',
+        content: contextMessage + '\n\n' + message
+      })
+      
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages,
+          max_tokens: 1000,
+          temperature: 0.7
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`OpenAI API error: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      return data.choices[0]?.message?.content || ''
+    } catch (error) {
+      console.error('Failed to send chat message with OpenAI:', error)
+      throw new Error('チャットメッセージの送信に失敗しました')
+    }
+  }
 }

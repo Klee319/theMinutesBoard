@@ -31,6 +31,12 @@ export abstract class BaseAIService {
     userPrompt?: string
   ): Promise<NextStep[]>
 
+  // チャットメッセージ送信メソッド
+  abstract sendChatMessage(
+    message: string,
+    context: any
+  ): Promise<string>
+
   protected calculateDuration(transcripts: Transcript[]): number {
     if (transcripts.length === 0) return 0
     

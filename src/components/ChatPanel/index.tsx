@@ -43,20 +43,46 @@ export default function ChatPanel({ meeting, isLiveMode }: ChatPanelProps) {
     setIsLoading(true)
 
     try {
-      // AIチャット機能は今後実装
-      const assistantMessage: ChatMessage = {
-        id: `msg_${Date.now()}_assistant`,
-        role: 'assistant',
-        content: 'AIチャット機能は現在開発中です。会議の内容に関する質問や、議事録の編集指示などができるようになります。',
-        timestamp: new Date()
-      }
-      
-      setTimeout(() => {
-        setMessages(prev => [...prev, assistantMessage])
+      // background scriptにチャットメッセージを送信
+      chrome.runtime.sendMessage({
+        type: 'CHAT_MESSAGE',
+        payload: {
+          meetingId: meeting.id,
+          message: inputValue.trim(),
+          context: {
+            isLiveMode,
+            messageHistory: messages.slice(-10) // 最近10件の会話履歴
+          }
+        }
+      }, (response) => {
+        if (response?.success && response.response) {
+          const assistantMessage: ChatMessage = {
+            id: `msg_${Date.now()}_assistant`,
+            role: 'assistant',
+            content: response.response,
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, assistantMessage])
+        } else {
+          const errorMessage: ChatMessage = {
+            id: `msg_${Date.now()}_error`,
+            role: 'assistant',
+            content: `エラー: ${response?.error || 'メッセージの送信に失敗しました'}`,
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, errorMessage])
+        }
         setIsLoading(false)
-      }, 1000)
+      })
     } catch (error) {
       console.error('Error sending message:', error)
+      const errorMessage: ChatMessage = {
+        id: `msg_${Date.now()}_error`,
+        role: 'assistant',
+        content: 'エラー: メッセージの送信に失敗しました',
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, errorMessage])
       setIsLoading(false)
     }
   }

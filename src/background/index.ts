@@ -2,6 +2,7 @@ import { ChromeMessage, MessageType, StorageData, Meeting, UserSettings } from '
 import { geminiService } from '@/services/gemini'
 import { AIServiceFactory } from '@/services/ai/factory'
 import { debugStorageInfo } from './debug'
+import { CHAT_ASSISTANT_PROMPT } from '@/system-prompts'
 
 let currentMeetingId: string | null = null
 let recordingTabId: number | null = null
@@ -153,6 +154,15 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
           .then(() => sendResponse({ success: true }))
           .catch(error => {
             console.error('Error updating participant:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
+      case 'CHAT_MESSAGE':
+        handleChatMessage(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error handling chat message:', error)
             sendResponse({ success: false, error: error.message })
           })
         return true
@@ -770,5 +780,60 @@ async function handleDeleteNextStep(payload: any): Promise<any> {
   } catch (error) {
     console.error('Error deleting next step:', error)
     return { success: false, error: error.message }
+  }
+}
+
+async function handleChatMessage(payload: { meetingId: string; message: string; context?: any }): Promise<{ success: boolean; response?: string; error?: string }> {
+  const { meetingId, message, context } = payload
+  
+  if (!meetingId || !message) {
+    return { success: false, error: 'Meeting ID and message are required' }
+  }
+  
+  try {
+    // 会議データを取得
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meeting = meetings.find(m => m.id === meetingId)
+    if (!meeting) {
+      return { success: false, error: 'Meeting not found' }
+    }
+    
+    // 設定を取得
+    const settings = await new Promise<UserSettings>((resolve) => {
+      chrome.storage.local.get(['settings'], (result) => {
+        resolve(result.settings || {})
+      })
+    })
+    
+    // AIサービスを使用してチャット応答を生成
+    const aiService = AIServiceFactory.createService(settings)
+    
+    // コンテキストを構築
+    const chatContext = {
+      systemPrompt: CHAT_ASSISTANT_PROMPT,
+      meetingInfo: {
+        title: meeting.title,
+        startTime: meeting.startTime,
+        participants: meeting.participants,
+        transcriptsCount: meeting.transcripts.length,
+        hasMinutes: !!meeting.minutes
+      },
+      minutes: meeting.minutes?.content || null,
+      recentTranscripts: meeting.transcripts.slice(-20), // 最新20件の字幕
+      ...context
+    }
+    
+    // チャットメッセージを送信
+    const response = await aiService.sendChatMessage(message, chatContext)
+    
+    return { success: true, response }
+  } catch (error) {
+    console.error('Error handling chat message:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 }
