@@ -24,7 +24,8 @@
       "Bash(rm:*)",
       "Bash(rg:*)",
       "Bash(zip:*)",
-      "Bash(tar:*)"
+      "Bash(tar:*)",
+      "Bash(gh:*)"
     ],
     "deny": []
   },
