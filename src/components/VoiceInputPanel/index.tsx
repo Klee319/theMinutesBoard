@@ -124,7 +124,7 @@ export default function VoiceInputPanel({
     <div className="bg-white rounded-lg shadow-sm h-full flex flex-col">
       <div className="p-4 border-b bg-purple-50">
         <h2 className="text-lg font-semibold text-purple-900 flex items-center gap-2">
-          🎙️ 音声入力
+          音声入力
           {meeting && (
             <button
               onClick={onStopRecording}
@@ -136,94 +136,50 @@ export default function VoiceInputPanel({
         </h2>
       </div>
 
-      <div className="flex-1 p-4 flex flex-col">
+      <div className="flex-1 p-4 flex flex-col justify-center">
         {meeting ? (
           <>
             {/* 録音ボタンエリア */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="flex gap-4 items-center">
               <button
                 onClick={() => recordingState.isRecording ? stopRecording() : startRecording('edit')}
                 disabled={isLocked || (recordingState.isRecording && recordingState.mode !== 'edit')}
-                className={`py-4 px-6 rounded-lg border-2 font-medium transition-all ${getButtonStyle('edit')}`}
+                className={`flex-1 py-3 px-4 rounded-lg border-2 font-medium transition-all ${getButtonStyle('edit')}`}
               >
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-2xl">✏️</span>
-                  <span className="text-sm">
-                    {recordingState.isRecording && recordingState.mode === 'edit' 
-                      ? '停止して編集' 
-                      : '議事録編集'}
-                  </span>
-                </div>
+                {recordingState.isRecording && recordingState.mode === 'edit' 
+                  ? '⏹ 停止して編集' 
+                  : '✏️ 議事録編集'}
               </button>
+              <span className="text-xs text-gray-600">音声で編集指示</span>
 
               <button
                 onClick={() => recordingState.isRecording ? stopRecording() : startRecording('research')}
                 disabled={isLocked || (recordingState.isRecording && recordingState.mode !== 'research')}
-                className={`py-4 px-6 rounded-lg border-2 font-medium transition-all ${getButtonStyle('research')}`}
+                className={`flex-1 py-3 px-4 rounded-lg border-2 font-medium transition-all ${getButtonStyle('research')}`}
               >
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-2xl">🔍</span>
-                  <span className="text-sm">
-                    {recordingState.isRecording && recordingState.mode === 'research' 
-                      ? '停止してリサーチ' 
-                      : 'リサーチ'}
-                  </span>
-                </div>
+                {recordingState.isRecording && recordingState.mode === 'research' 
+                  ? '⏹ 停止してリサーチ' 
+                  : '🔍 リサーチ'}
               </button>
+              <span className="text-xs text-gray-600">会議内容を質問</span>
             </div>
 
             {/* 録音状態表示 */}
             {recordingState.isRecording && (
-              <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-gray-700">
-                    {recordingState.mode === 'edit' ? '📝 編集指示を録音中' : '🔍 質問を録音中'}
+              <div className="mt-4 flex items-center justify-center">
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                  <span className="text-gray-700">
+                    {recordingState.mode === 'edit' ? '編集指示を録音中' : '質問を録音中'}
                   </span>
-                  <span className="text-sm font-mono text-gray-600">
+                  <span className="font-mono text-gray-600">
                     {getRecordingDuration()}
                   </span>
                 </div>
-                
-                <div className="text-xs text-gray-500 mb-2">
-                  キャプチャした発言: {recordingState.capturedTranscripts.length}件
-                </div>
-                
-                {recordingState.capturedTranscripts.length > 0 && (
-                  <div className="max-h-20 overflow-y-auto">
-                    <div className="text-xs text-gray-600 bg-white p-2 rounded border">
-                      {recordingState.capturedTranscripts.slice(-3).map((transcript, index) => (
-                        <div key={index} className="truncate">
-                          {transcript}
-                        </div>
-                      ))}
-                      {recordingState.capturedTranscripts.length > 3 && (
-                        <div className="text-gray-400">
-                          ...他 {recordingState.capturedTranscripts.length - 3}件
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
-
-            {/* 使用方法説明 */}
-            <div className="bg-blue-50 rounded-lg p-3 text-sm">
-              <h4 className="font-medium text-blue-900 mb-2">使用方法</h4>
-              <ul className="text-blue-800 space-y-1 text-xs">
-                <li>• <strong>議事録編集</strong>: 音声で議事録の修正指示を出す</li>
-                <li>• <strong>リサーチ</strong>: 会議内容について質問する</li>
-                <li>• ボタンを押して録音開始、再度押して処理実行</li>
-              </ul>
-            </div>
           </>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="text-4xl mb-4">🎙️</div>
-            <p className="text-gray-600 mb-2">記録中の会議がありません</p>
-            <p className="text-sm text-gray-500">Google Meetで記録を開始してください</p>
-          </div>
-        )}
+        ) : null}
       </div>
 
       {isLocked && (

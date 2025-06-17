@@ -80,27 +80,15 @@ export default function LiveModeLayout({
       {/* 左側: Facilitator AI */}
       <ResizablePanel
         position="left"
-        defaultWidth={600}
-        minWidth={400}
-        maxWidth={800}
+        defaultWidth={window.innerWidth * 0.5}
+        minWidth={window.innerWidth * 0.2}
+        maxWidth={window.innerWidth * 0.8}
         className="flex-shrink-0"
       >
         <div className="bg-white rounded-lg shadow-sm h-full flex flex-col">
-          <div className="p-4 border-b bg-blue-50">
-            <h2 className="text-lg font-semibold text-blue-900 flex items-center gap-2">
-              🤖 Facilitator AI
-              {meeting && (
-                <div className="flex items-center gap-1 ml-auto">
-                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm text-red-600 font-medium">記録中</span>
-                </div>
-              )}
-            </h2>
-          </div>
-          
           <div className="flex-1 flex flex-col">
             {/* 議事録（実況）セクション */}
-            <div className="flex-1 border-b">
+            <div className="flex-1 border-b min-h-0">
               <LiveMinutesPanel 
                 meeting={meeting}
                 isGenerating={isMinutesGenerating || (isUpdating && updateSource === 'manual')}
@@ -110,7 +98,7 @@ export default function LiveModeLayout({
             </div>
             
             {/* ネクストステップセクション */}
-            <div className="h-80">
+            <div className="flex-1 min-h-0">
               <LiveNextStepsPanel 
                 meeting={meeting}
                 isLocked={isUpdating}
@@ -123,7 +111,7 @@ export default function LiveModeLayout({
       {/* 右側: 音声入力エリア */}
       <div className="flex-1 flex flex-col gap-4">
         {/* 音声コントロールパネル */}
-        <div className="h-64">
+        <div className="h-32 flex-shrink-0">
           <VoiceInputPanel
             meeting={meeting}
             isLocked={isUpdating && updateSource === 'ai-edit'}
@@ -133,7 +121,7 @@ export default function LiveModeLayout({
         </div>
 
         {/* チャット履歴パネル */}
-        <div className="flex-1">
+        <div className="flex-1 min-h-0">
           <ChatHistoryPanel
             meeting={meeting}
           />

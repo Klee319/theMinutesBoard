@@ -165,7 +165,7 @@ export interface NextStep {
   task: string
   assignee?: string
   dueDate?: Date
-  status: 'pending' | 'confirmed' | 'in_progress' | 'completed'
+  status: 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'deleted'
   isPending: boolean // 未確定項目フラグ（赤字表示用）
   priority?: 'high' | 'medium' | 'low'
   dependencies: string[] // 他のタスクID

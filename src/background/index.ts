@@ -723,10 +723,10 @@ async function handleGenerateNextSteps(payload: any): Promise<any> {
 
 // ネクストステップ更新のハンドラー
 async function handleUpdateNextStep(payload: any): Promise<any> {
-  const { meetingId, nextStepId, updates } = payload || {}
+  const { meetingId, stepId, updates } = payload || {}
   
-  if (!meetingId || !nextStepId) {
-    return { success: false, error: 'Meeting ID and NextStep ID are required' }
+  if (!meetingId || !stepId) {
+    return { success: false, error: 'Meeting ID and Step ID are required' }
   }
   
   try {
@@ -741,7 +741,7 @@ async function handleUpdateNextStep(payload: any): Promise<any> {
       return { success: false, error: 'Meeting or nextSteps not found' }
     }
     
-    const nextStepIndex = meeting.nextSteps.findIndex(ns => ns.id === nextStepId)
+    const nextStepIndex = meeting.nextSteps.findIndex(ns => ns.id === stepId)
     if (nextStepIndex === -1) {
       return { success: false, error: 'NextStep not found' }
     }

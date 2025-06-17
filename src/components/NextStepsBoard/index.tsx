@@ -8,7 +8,7 @@ interface NextStepsBoardProps {
 
 export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
   const [allNextSteps, setAllNextSteps] = useState<Array<NextStep & { meetingId: string; meetingTitle: string }>>([])
-  const [filter, setFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed'>('pending')
+  const [filter, setFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed' | 'deleted'>('pending')
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
@@ -74,24 +74,39 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
   const filteredSteps = allNextSteps.filter(step => {
     switch (filter) {
       case 'pending':
-        return step.status === 'pending' || step.status === 'confirmed'
+        return step.status === 'pending'
       case 'in_progress':
         return step.status === 'in_progress'
       case 'completed':
         return step.status === 'completed'
+      case 'deleted':
+        return step.status === 'deleted'
       default:
-        return true
+        return step.status !== 'deleted'
     }
   })
 
-  const handleStatusChange = async (stepId: string, meetingId: string, newStatus: 'pending' | 'in_progress' | 'completed') => {
+  const handleStatusChange = async (stepId: string, meetingId: string, newStatus: 'pending' | 'in_progress' | 'completed' | 'deleted', isPendingUpdate?: boolean) => {
     try {
+      const step = allNextSteps.find(s => s.id === stepId && s.meetingId === meetingId)
+      if (!step) return
+
+      const updates: any = { status: newStatus }
+      
+      // isPendingフラグの更新処理
+      if (isPendingUpdate !== undefined) {
+        updates.isPending = isPendingUpdate
+      } else if (step.isPending && newStatus !== 'pending') {
+        // 要確認状態から他の状態に変更する場合は自動的にisPendingをfalseに
+        updates.isPending = false
+      }
+
       const response = await chrome.runtime.sendMessage({
         type: 'UPDATE_NEXTSTEP',
         payload: {
           meetingId,
           stepId,
-          updates: { status: newStatus }
+          updates
         }
       })
       
@@ -99,9 +114,22 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
         // ローカル状態を更新
         setAllNextSteps(prev => prev.map(s => 
           s.id === stepId && s.meetingId === meetingId 
-            ? { ...s, status: newStatus, updatedAt: new Date() }
+            ? { ...s, ...updates, updatedAt: new Date() }
             : s
         ))
+        
+        // 新しい状態に応じてフィルターを自動切り替え
+        switch (newStatus) {
+          case 'pending':
+            setFilter('pending')
+            break
+          case 'in_progress':
+            setFilter('in_progress')
+            break
+          case 'completed':
+            setFilter('completed')
+            break
+        }
       }
     } catch (error) {
       logger.error('Error updating next step status:', error)
@@ -111,7 +139,6 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
   const getNextStatus = (currentStatus: string): string => {
     switch (currentStatus) {
       case 'pending':
-      case 'confirmed':
         return 'in_progress'
       case 'in_progress':
         return 'completed'
@@ -122,10 +149,22 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
     }
   }
 
+  const getPreviousStatus = (currentStatus: string): string => {
+    switch (currentStatus) {
+      case 'pending':
+        return 'completed'
+      case 'in_progress':
+        return 'pending'
+      case 'completed':
+        return 'in_progress'
+      default:
+        return 'pending'
+    }
+  }
+
   const getStatusIcon = (status: string): string => {
     switch (status) {
       case 'pending': return '○'
-      case 'confirmed': return '●'
       case 'in_progress': return '⏳'
       case 'completed': return '✅'
       default: return '○'
@@ -135,7 +174,6 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
   const getStatusColor = (status: string): string => {
     switch (status) {
       case 'pending': return 'text-gray-500'
-      case 'confirmed': return 'text-blue-600'
       case 'in_progress': return 'text-orange-600'
       case 'completed': return 'text-green-600'
       default: return 'text-gray-500'
@@ -145,7 +183,6 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
   const getStatusLabel = (status: string): string => {
     switch (status) {
       case 'pending': return '未実行'
-      case 'confirmed': return '確認済み'
       case 'in_progress': return '実行中'
       case 'completed': return '完了済み'
       default: return '未実行'
@@ -206,6 +243,31 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
     return date
   }
 
+  const handleDeletePermanently = async (stepId: string, meetingId: string) => {
+    if (!confirm('このタスクを完全に削除しますか？この操作は取り消せません。')) {
+      return
+    }
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'DELETE_NEXTSTEP',
+        payload: {
+          meetingId,
+          nextStepId: stepId
+        }
+      })
+      
+      if (response.success) {
+        // ローカル状態から削除
+        setAllNextSteps(prev => prev.filter(s => 
+          !(s.id === stepId && s.meetingId === meetingId)
+        ))
+      }
+    } catch (error) {
+      logger.error('Error deleting next step permanently:', error)
+    }
+  }
+
   return (
     <div className="h-full flex flex-col">
       {/* ヘッダー */}
@@ -222,7 +284,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                 : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
             }`}
           >
-            未実行 ({allNextSteps.filter(s => s.status === 'pending' || s.status === 'confirmed').length})
+            未実行 ({allNextSteps.filter(s => s.status === 'pending').length})
           </button>
           <button
             onClick={() => setFilter('in_progress')}
@@ -252,7 +314,17 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                 : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
             }`}
           >
-            すべて ({allNextSteps.length})
+            すべて ({allNextSteps.filter(s => s.status !== 'deleted').length})
+          </button>
+          <button
+            onClick={() => setFilter('deleted')}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+              filter === 'deleted'
+                ? 'bg-gray-800 text-white'
+                : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            🗑️ ゴミ箱 ({allNextSteps.filter(s => s.status === 'deleted').length})
           </button>
         </div>
       </div>
@@ -266,6 +338,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
               {filter === 'pending' ? '未実行のタスクはありません' :
                filter === 'in_progress' ? '実行中のタスクはありません' :
                filter === 'completed' ? '完了済みのタスクはありません' :
+               filter === 'deleted' ? 'ゴミ箱は空です' :
                'ネクストステップがありません'}
             </p>
             <p className="text-gray-500">会議の議事録からネクストステップを生成してください</p>
@@ -277,18 +350,14 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                 key={`${step.meetingId}-${step.id}`}
                 className={`p-4 bg-white rounded-lg border transition-all ${
                   step.isPending ? 'border-orange-300 bg-orange-50' : 'border-gray-200'
-                } ${step.status === 'completed' ? 'opacity-60' : ''} hover:shadow-sm`}
+                } hover:shadow-sm`}
               >
                 <div className="flex items-start gap-3">
-                  {/* ステータスボタン */}
-                  <div className="flex flex-col gap-1">
-                    <button
-                      onClick={() => handleStatusChange(step.id, step.meetingId, getNextStatus(step.status) as 'pending' | 'in_progress' | 'completed')}
-                      className={`text-lg transition-all hover:scale-110 ${getStatusColor(step.status)}`}
-                      title={`${getStatusLabel(step.status)} → ${getStatusLabel(getNextStatus(step.status))}`}
-                    >
+                  {/* ステータスアイコン */}
+                  <div className="flex flex-col gap-1 items-center">
+                    <div className={`text-2xl ${getStatusColor(step.status)}`}>
                       {getStatusIcon(step.status)}
-                    </button>
+                    </div>
                     <span className={`text-xs font-medium ${getStatusColor(step.status)}`}>
                       {getStatusLabel(step.status)}
                     </span>
@@ -299,7 +368,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
                         <p className={`font-medium ${
-                          step.status === 'completed' ? 'line-through text-gray-500' : 'text-gray-900'
+                          step.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-900'
                         } ${step.isPending ? 'text-orange-700' : ''}`}>
                           {step.task}
                         </p>
@@ -313,6 +382,83 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                         <span className={`px-2 py-0.5 text-xs font-semibold rounded ${getPriorityColor(step.priority)}`}>
                           {getPriorityLabel(step.priority)}
                         </span>
+                      )}
+                    </div>
+                    
+                    {/* 状態変更ボタン */}
+                    <div className="mt-3 flex gap-2 flex-wrap">
+                      {/* 要確認の場合の確認済みボタン */}
+                      {step.isPending && (
+                        <button
+                          onClick={() => handleStatusChange(step.id, step.meetingId, step.status, false)}
+                          className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                        >
+                          ✓ 確認済みにする
+                        </button>
+                      )}
+                      
+                      {/* 状態遷移ボタン */}
+                      {step.status === 'pending' && (
+                        <button
+                          onClick={() => handleStatusChange(step.id, step.meetingId, 'in_progress')}
+                          className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
+                        >
+                          → 実行中にする
+                        </button>
+                      )}
+                      
+                      {step.status === 'in_progress' && (
+                        <>
+                          <button
+                            onClick={() => handleStatusChange(step.id, step.meetingId, 'pending')}
+                            className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                          >
+                            ← 未実行に戻す
+                          </button>
+                          <button
+                            onClick={() => handleStatusChange(step.id, step.meetingId, 'completed')}
+                            className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                          >
+                            ✓ 完了にする
+                          </button>
+                        </>
+                      )}
+                      
+                      {step.status === 'completed' && (
+                        <button
+                          onClick={() => handleStatusChange(step.id, step.meetingId, 'in_progress')}
+                          className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
+                        >
+                          ← 実行中に戻す
+                        </button>
+                      )}
+                      
+                      {/* ゴミ箱ボタン（削除済み以外のタスクに表示） */}
+                      {step.status !== 'deleted' && (
+                        <button
+                          onClick={() => handleStatusChange(step.id, step.meetingId, 'deleted')}
+                          className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors ml-auto"
+                        >
+                          🗑️ 削除
+                        </button>
+                      )}
+                      
+                      {/* 復元ボタン（削除済みタスクに表示） */}
+                      {step.status === 'deleted' && (
+                        <>
+                          <button
+                            onClick={() => handleStatusChange(step.id, step.meetingId, 'pending')}
+                            className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                          >
+                            ↩️ 復元
+                          </button>
+                          <button
+                            onClick={() => handleDeletePermanently(step.id, step.meetingId)}
+                            className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                          >
+                            ❌ 完全削除
+                          </button>
+                        </>
                       )}
                     </div>
 
@@ -349,7 +495,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
       <div className="p-4 border-t bg-gray-50">
         <div className="grid grid-cols-4 gap-4 text-center">
           <div>
-            <p className="text-2xl font-bold text-gray-600">{allNextSteps.filter(s => s.status === 'pending' || s.status === 'confirmed').length}</p>
+            <p className="text-2xl font-bold text-gray-600">{allNextSteps.filter(s => s.status === 'pending').length}</p>
             <p className="text-xs text-gray-600">未実行</p>
           </div>
           <div>
