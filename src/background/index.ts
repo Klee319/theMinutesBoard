@@ -3,6 +3,7 @@ import { geminiService } from '@/services/gemini'
 import { AIServiceFactory } from '@/services/ai/factory'
 import { debugStorageInfo } from './debug'
 import { CHAT_ASSISTANT_PROMPT } from '@/system-prompts'
+import { logger } from '@/utils/logger'
 
 let currentMeetingId: string | null = null
 let recordingTabId: number | null = null
@@ -12,21 +13,21 @@ let isMinutesGenerating = false
 
 // 拡張機能のインストール・更新時の処理
 chrome.runtime.onInstalled.addListener((details) => {
-  console.log('Extension installed/updated:', details.reason)
+  logger.info('Extension installed/updated:', details.reason)
   
   // データの整合性チェック
   chrome.storage.local.get(['meetings'], (result) => {
     if (chrome.runtime.lastError) {
-      console.error('Storage error on install:', chrome.runtime.lastError)
+      logger.error('Storage error on install:', chrome.runtime.lastError)
       return
     }
     
     const meetings = result.meetings || []
-    console.log(`Extension ${details.reason} - existing meetings: ${meetings.length}`)
+    logger.info(`Extension ${details.reason} - existing meetings: ${meetings.length}`)
     
     // データが破損していないか確認
     if (meetings.length > 0 && !Array.isArray(meetings)) {
-      console.error('Corrupted meetings data detected, initializing...')
+      logger.error('Corrupted meetings data detected, initializing...')
       chrome.storage.local.set({ meetings: [] })
     }
   })
@@ -35,18 +36,20 @@ chrome.runtime.onInstalled.addListener((details) => {
 // 起動時に前回の状態を確認
 chrome.runtime.onStartup.addListener(() => {
   chrome.storage.local.get(['currentMeetingId', 'meetings'], (result) => {
-    console.log('Extension startup - Current meetings count:', result.meetings?.length || 0)
+    logger.info('Extension startup - Current meetings count:', result.meetings?.length || 0)
     if (result.currentMeetingId) {
       // 前回のセッションが残っている場合はクリア
       chrome.storage.local.remove(['currentMeetingId'])
     }
     // デバッグ情報を出力
-    debugStorageInfo()
+    if (logger.isDevelopment) {
+      debugStorageInfo()
+    }
   })
 })
 
 chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendResponse) => {
-  console.log('Background received message:', message)
+  logger.debug('Background received message:', message.type)
   
   try {
     switch (message.type) {
@@ -54,8 +57,8 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
         handleStartRecording(sender.tab?.id, message.payload)
           .then(() => sendResponse({ success: true }))
           .catch(error => {
-            console.error('Error starting recording:', error)
-            sendResponse({ success: false, error: error.message })
+            logger.logError(error, 'START_RECORDING')
+            sendResponse({ success: false, error: error instanceof Error ? error.message : 'Recording failed' })
           })
         return true
         
@@ -63,8 +66,8 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
         handleStopRecording()
           .then(() => sendResponse({ success: true }))
           .catch(error => {
-            console.error('Error stopping recording:', error)
-            sendResponse({ success: false, error: error.message })
+            logger.logError(error, 'STOP_RECORDING')
+            sendResponse({ success: false, error: error instanceof Error ? error.message : 'Stop recording failed' })
           })
         return true
         
@@ -72,8 +75,8 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
         handleTranscriptUpdate(message.payload)
           .then(() => sendResponse({ success: true }))
           .catch(error => {
-            console.error('Error updating transcript:', error)
-            sendResponse({ success: false, error: error.message })
+            logger.logError(error, 'TRANSCRIPT_UPDATE')
+            sendResponse({ success: false, error: error instanceof Error ? error.message : 'Transcript update failed' })
           })
         return true
         
@@ -81,8 +84,8 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
         handleGenerateMinutes()
           .then(result => sendResponse(result))
           .catch(error => {
-            console.error('Error generating minutes:', error)
-            sendResponse({ success: false, error: error.message })
+            logger.logError(error, 'GENERATE_MINUTES')
+            sendResponse({ success: false, error: error instanceof Error ? error.message : 'Minutes generation failed' })
           })
         return true
         
@@ -167,12 +170,30 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
           })
         return true
         
+      case 'AI_EDIT_MINUTES':
+        handleAiEditMinutes(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error handling AI edit minutes:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
+      case 'AI_RESEARCH':
+        handleAiResearch(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error handling AI research:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
       default:
         sendResponse({ success: false, error: 'Unknown message type' })
         return false
     }
   } catch (error) {
-    console.error('Unexpected error in background script:', error)
+    logger.logError(error, 'BACKGROUND_MESSAGE_HANDLER')
     sendResponse({ success: false, error: 'Unexpected error occurred' })
     return false
   }
@@ -185,7 +206,7 @@ async function handleStartRecording(tabId?: number, payload?: any): Promise<void
   
   // 既に記録中の場合は新しい記録を開始しない
   if (currentMeetingId && recordingTabId === tabId) {
-    console.log('Already recording in this tab')
+    logger.debug('Already recording in this tab')
     return
   }
   
@@ -834,6 +855,184 @@ async function handleChatMessage(payload: { meetingId: string; message: string; 
     return { success: true, response }
   } catch (error) {
     console.error('Error handling chat message:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+}
+
+async function handleAiEditMinutes(payload: { meetingId: string; instruction: string; transcripts: string[] }): Promise<{ success: boolean; error?: string }> {
+  const { meetingId, instruction, transcripts } = payload
+  
+  if (!meetingId || !instruction) {
+    return { success: false, error: 'Meeting ID and instruction are required' }
+  }
+  
+  try {
+    // 会議データを取得
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meeting = meetings.find(m => m.id === meetingId)
+    if (!meeting) {
+      return { success: false, error: 'Meeting not found' }
+    }
+    
+    // 設定を取得
+    const settings = await new Promise<UserSettings>((resolve) => {
+      chrome.storage.local.get(['settings'], (result) => {
+        resolve(result.settings || {})
+      })
+    })
+    
+    // AIサービスを使用して議事録を編集
+    const aiService = AIServiceFactory.createService(settings)
+    
+    // 編集プロンプトを構築
+    const editPrompt = `
+現在の議事録を以下の指示に従って編集してください。
+
+【編集指示】
+${instruction}
+
+【音声入力内容】
+${transcripts.join('\n')}
+
+【現在の議事録】
+${meeting.minutes?.content || '（議事録がまだ生成されていません）'}
+
+【編集方針】
+1. 指示された内容を適切に反映する
+2. 既存の構造と形式を維持する
+3. 追加情報がある場合は適切な場所に挿入する
+4. 修正が必要な場合は正確に反映する
+5. マークダウン形式を維持する
+
+編集後の議事録全文を返してください。
+`
+    
+    const editedContent = await aiService.generateText(editPrompt, {
+      maxTokens: 4000,
+      temperature: 0.3
+    })
+    
+    // 編集された議事録を保存
+    const meetingIndex = meetings.findIndex(m => m.id === meetingId)
+    if (meetingIndex !== -1) {
+      meetings[meetingIndex].minutes = {
+        id: meetings[meetingIndex].minutes?.id || `minutes_${Date.now()}`,
+        content: editedContent,
+        generatedAt: new Date(),
+        format: 'markdown' as const,
+        editHistory: [
+          ...(meetings[meetingIndex].minutes?.editHistory || []),
+          {
+            timestamp: new Date(),
+            instruction,
+            transcripts
+          }
+        ]
+      }
+      
+      // 保存
+      await new Promise<void>((resolve) => {
+        chrome.storage.local.set({ meetings }, () => {
+          resolve()
+        })
+      })
+      
+      // LiveModeLayoutに更新通知
+      if (recordingTabId) {
+        chrome.tabs.sendMessage(recordingTabId, {
+          type: 'MINUTES_UPDATED',
+          payload: {
+            meetingId,
+            minutes: meetings[meetingIndex].minutes,
+            source: 'ai-edit'
+          }
+        }).catch(() => {
+          // エラーは無視
+        })
+      }
+    }
+    
+    return { success: true }
+  } catch (error) {
+    console.error('Error handling AI edit minutes:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+}
+
+async function handleAiResearch(payload: { meetingId: string; question: string; transcripts: string[] }): Promise<{ success: boolean; response?: string; error?: string }> {
+  const { meetingId, question, transcripts } = payload
+  
+  if (!meetingId || !question) {
+    return { success: false, error: 'Meeting ID and question are required' }
+  }
+  
+  try {
+    // 会議データを取得
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meeting = meetings.find(m => m.id === meetingId)
+    if (!meeting) {
+      return { success: false, error: 'Meeting not found' }
+    }
+    
+    // 設定を取得
+    const settings = await new Promise<UserSettings>((resolve) => {
+      chrome.storage.local.get(['settings'], (result) => {
+        resolve(result.settings || {})
+      })
+    })
+    
+    // AIサービスを使用してリサーチ応答を生成
+    const aiService = AIServiceFactory.createService(settings)
+    
+    // リサーチプロンプトを構築
+    const researchPrompt = `
+以下の質問について、会議の内容と文脈を踏まえて詳しく回答してください。
+
+【質問】
+${question}
+
+【音声入力内容】
+${transcripts.join('\n')}
+
+【会議情報】
+- タイトル: ${meeting.title}
+- 参加者: ${meeting.participants.join(', ')}
+- 発言数: ${meeting.transcripts.length}件
+
+【議事録】
+${meeting.minutes?.content || '（議事録がまだ生成されていません）'}
+
+【最近の発言履歴】
+${meeting.transcripts.slice(-10).map(t => `${t.speaker}: ${t.content}`).join('\n')}
+
+【回答方針】
+1. 会議の内容に基づいて具体的に回答する
+2. 関連する発言や決定事項があれば引用する
+3. 不明な点は正直に「会議では言及されていません」と伝える
+4. 必要に応じて追加の質問や提案をする
+5. 簡潔で分かりやすい回答を心がける
+
+質問に対する回答をお願いします。
+`
+    
+    const response = await aiService.generateText(researchPrompt, {
+      maxTokens: 2000,
+      temperature: 0.7
+    })
+    
+    return { success: true, response }
+  } catch (error) {
+    console.error('Error handling AI research:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 }

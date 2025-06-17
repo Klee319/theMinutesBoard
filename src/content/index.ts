@@ -1,4 +1,5 @@
 import { ChromeMessage } from '@/types'
+import { logger } from '@/utils/logger'
 import './styles.css'
 
 class TranscriptCapture {
@@ -17,6 +18,8 @@ class TranscriptCapture {
   private currentUserName: string | null = null
   private participantsObserver: MutationObserver | null = null
   private currentParticipants: Set<string> = new Set()
+  private cleanupTimeouts: Set<number> = new Set()
+  private cleanupIntervals: Set<number> = new Set()
   
   constructor() {
     this.initAsync()
@@ -31,7 +34,7 @@ class TranscriptCapture {
     if (!this.currentUserName) return speaker
     
     if (speaker === 'あなた' || speaker === 'You' || speaker === '自分') {
-      console.log(`Replacing "${speaker}" with user name: ${this.currentUserName}`)
+      logger.debug(`Replacing "${speaker}" with user name: ${this.currentUserName}`)
       return this.currentUserName
     }
     
@@ -43,9 +46,9 @@ class TranscriptCapture {
     const result = await chrome.storage.sync.get(['settings'])
     if (result.settings?.userName) {
       this.currentUserName = result.settings.userName
-      console.log('Loaded user name:', this.currentUserName)
+      logger.debug('Loaded user name:', this.currentUserName)
     } else {
-      console.log('No user name found in settings')
+      logger.debug('No user name found in settings')
     }
   }
   
@@ -62,7 +65,7 @@ class TranscriptCapture {
     // 既存のセッションがあるか確認
     const result = await chrome.storage.local.get(['currentMeetingId'])
     if (result.currentMeetingId) {
-      console.log('Restoring existing session:', result.currentMeetingId)
+      logger.debug('Restoring existing session:', result.currentMeetingId)
       this.isRecording = true
       this.updateRecordingUI(true)
       
@@ -138,7 +141,7 @@ class TranscriptCapture {
             <span class="loading-text">AIが処理中...</span>
           </div>
           <div id="minutes-text" class="minutes-text-display">
-            議事録を生成中...
+            <p class="empty-message">記録を開始して議事録を生成してください</p>
           </div>
         </div>
         <div id="nextsteps-content" class="tab-content nextsteps-content-area" style="display:none;">
@@ -274,13 +277,13 @@ class TranscriptCapture {
         const newSettings = changes.settings.newValue
         if (newSettings?.userName) {
           this.currentUserName = newSettings.userName
-          console.log('Updated user name:', this.currentUserName)
+          logger.debug('Updated user name:', this.currentUserName)
         }
       }
     })
     
     chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendResponse) => {
-      console.log('Content script received message:', message.type)
+      logger.debug('Content script received message:', message.type)
       
       switch (message.type) {
         case 'GET_RECORDING_STATUS':
@@ -359,7 +362,7 @@ class TranscriptCapture {
           if (isVisible) {
             this.captionsContainer = element
             captionsFound = true
-            console.log('Captions container found with selector:', selector)
+            logger.debug('Captions container found with selector:', selector)
             break
           }
         }
@@ -367,8 +370,10 @@ class TranscriptCapture {
       
       if (captionsFound) {
         clearInterval(checkInterval)
+        this.cleanupIntervals.delete(checkInterval)
       }
     }, 1000)
+    this.cleanupIntervals.add(checkInterval)
   }
   
   private checkForCaptions() {
@@ -385,7 +390,7 @@ class TranscriptCapture {
       const element = document.querySelector(selector)
       if (element && (element as HTMLElement).offsetParent !== null) {
         this.captionsContainer = element
-        console.log('Captions container found with selector:', selector)
+        logger.debug('Captions container found with selector:', selector)
         return true
       }
     }
@@ -394,7 +399,7 @@ class TranscriptCapture {
   
   private startRecording() {
     if (this.isRecording) {
-      console.log('Already recording')
+      logger.debug('Already recording')
       return
     }
     
@@ -402,7 +407,7 @@ class TranscriptCapture {
     this.checkForCaptions()
     
     if (!this.captionsContainer) {
-      console.log('No captions container found')
+      logger.warn('No captions container found')
       this.showNotification('字幕が有効になっていません。字幕をONにしてください。', 'error')
       return
     }
@@ -414,7 +419,7 @@ class TranscriptCapture {
     // 現在の参加者を検出して初期リストとする
     this.detectParticipants()
     const initialParticipants = Array.from(this.currentParticipants)
-    console.log('Initial participants:', initialParticipants)
+    logger.debug('Initial participants:', initialParticipants)
     
     chrome.runtime.sendMessage({ 
       type: 'START_RECORDING',
@@ -423,7 +428,7 @@ class TranscriptCapture {
       }
     }, (response) => {
       if (chrome.runtime.lastError) {
-        console.error('Error sending START_RECORDING:', chrome.runtime.lastError)
+        logger.error('Error sending START_RECORDING:', chrome.runtime.lastError)
       }
     })
     
@@ -448,7 +453,7 @@ class TranscriptCapture {
       subtree: true
     })
     
-    console.log('Recording started')
+    logger.info('Recording started')
     this.showNotification('記録を開始しました')
   }
   
@@ -471,14 +476,14 @@ class TranscriptCapture {
     //   openTabBtn.style.display = 'flex'  // 非表示にしない
     // }
     
-    console.log('Recording stopped')
+    logger.info('Recording stopped')
   }
 
   private setupCallStatusMonitoring() {
     // URLの変更を監視（ページ離脱検知）
     const currentUrl = window.location.href
     const meetingId = currentUrl.split('/').pop() || ''
-    console.log('Setting up call status monitoring for URL:', currentUrl, 'Meeting ID:', meetingId)
+    logger.debug('Setting up call status monitoring for URL:', currentUrl, 'Meeting ID:', meetingId)
     
     // ページが会議画面から離脱したか監視
     const checkUrl = () => {
@@ -486,17 +491,18 @@ class TranscriptCapture {
       // 会議IDが変わった、またはmeet.google.comから離れた場合
       if (!newUrl.includes('meet.google.com') || 
           (meetingId && !newUrl.includes(meetingId))) {
-        console.log('URL changed, call likely ended:', newUrl)
+        logger.info('URL changed, call likely ended:', newUrl)
         this.handleCallEnded('URL change detected')
       }
     }
     
     // URLの変更を定期的にチェック
     const urlCheckInterval = setInterval(checkUrl, 1000)
+    this.cleanupIntervals.add(urlCheckInterval)
     
     // popstateイベントでも監視（ブラウザの戻る/進むボタン）
     window.addEventListener('popstate', () => {
-      console.log('Browser navigation detected')
+      logger.debug('Browser navigation detected')
       checkUrl()
     })
     
@@ -539,24 +545,35 @@ class TranscriptCapture {
           if (!button.dataset.callEndListenerAdded) {
             button.dataset.callEndListenerAdded = 'true'
             button.addEventListener('click', () => {
-              console.log('Call end button clicked')
+              logger.debug('Call end button clicked')
               // 少し遅延を入れて実際に通話が終了するのを待つ
               setTimeout(() => {
                 this.handleCallEnded('Call end button clicked')
               }, 1000)
             })
-            console.log('Added call end button listener to:', selector)
+            logger.debug('Added call end button listener to:', selector)
           }
         }
       }
     }
     
     // 定期的にボタンをチェック（動的に追加される可能性があるため）
-    setInterval(checkCallEndButton, 3000)
+    const checkButtonInterval = setInterval(checkCallEndButton, 3000)
+    this.cleanupIntervals.add(checkButtonInterval)
     checkCallEndButton() // 初回実行
   }
 
   private monitorMeetingElements() {
+    // Google Meetの会議ページかどうかを確認
+    const isInMeeting = window.location.pathname.includes('/') && 
+                       window.location.pathname.length > 1 &&
+                       !window.location.pathname.includes('landing')
+    
+    if (!isInMeeting) {
+      logger.debug('Not in a meeting page, skipping element monitoring')
+      return
+    }
+    
     // 会議画面の重要な要素が消失したかを監視
     const criticalSelectors = [
       '[data-self-name]', // 自分の名前表示
@@ -570,6 +587,13 @@ class TranscriptCapture {
     ]
     
     const checkMeetingElements = () => {
+      // 会議ページでない場合はチェックしない
+      if (!window.location.pathname.includes('/') || 
+          window.location.pathname.length <= 1 ||
+          window.location.pathname.includes('landing')) {
+        return
+      }
+      
       let elementsFound = 0
       
       for (const selector of criticalSelectors) {
@@ -579,14 +603,15 @@ class TranscriptCapture {
       }
       
       // 重要な要素が大幅に減った場合は通話終了と判断
-      if (elementsFound === 0 && this.isCallActive) {
-        console.log('Critical meeting elements disappeared')
+      if (elementsFound === 0 && this.isCallActive && this.isRecording) {
+        logger.warn('Critical meeting elements disappeared')
         this.handleCallEnded('Meeting elements disappeared')
       }
     }
     
     // 定期的にチェック
-    setInterval(checkMeetingElements, 3000)
+    const elementsCheckInterval = setInterval(checkMeetingElements, 3000)
+    this.cleanupIntervals.add(elementsCheckInterval)
     
     // MutationObserverでもメイン要素の削除を監視
     this.callStatusObserver = new MutationObserver((mutations) => {
@@ -597,7 +622,7 @@ class TranscriptCapture {
             if (node instanceof Element) {
               for (const selector of criticalSelectors) {
                 if (node.matches(selector) || node.querySelector(selector)) {
-                  console.log('Important meeting element removed:', selector)
+                  logger.debug('Important meeting element removed:', selector)
                   // 少し待ってから再チェック（一時的な削除の可能性があるため）
                   setTimeout(() => {
                     checkMeetingElements()
@@ -619,7 +644,7 @@ class TranscriptCapture {
   }
 
   private setupParticipantsMonitoring() {
-    console.log('Setting up participants monitoring')
+    logger.debug('Setting up participants monitoring')
     
     // 参加者リストの要素を定期的にチェック
     const checkParticipants = () => {
@@ -627,10 +652,12 @@ class TranscriptCapture {
     }
     
     // 初回チェック
-    setTimeout(checkParticipants, 3000)
+    const initialTimeout = setTimeout(checkParticipants, 3000)
+    this.cleanupTimeouts.add(initialTimeout)
     
     // 定期的なチェック
-    setInterval(checkParticipants, 10000)
+    const intervalId = setInterval(checkParticipants, 10000)
+    this.cleanupIntervals.add(intervalId)
   }
   
   private detectParticipants() {
@@ -722,11 +749,11 @@ class TranscriptCapture {
           // 有効な名前が見つかった場合は追加
           if (participantName && participantName.length > 1) {
             foundParticipants.add(participantName)
-            console.log(`Found participant: ${participantName} (selector: ${selector})`)
+            logger.debug(`Found participant: ${participantName} (selector: ${selector})`)
           }
         })
       } catch (error) {
-        console.error(`Error with selector ${selector}:`, error)
+        logger.error(`Error with selector ${selector}:`, error)
       }
     }
     
@@ -739,10 +766,10 @@ class TranscriptCapture {
       const leftParticipants = Array.from(this.currentParticipants).filter(p => !foundParticipants.has(p))
       
       if (newParticipants.length > 0 || leftParticipants.length > 0) {
-        console.log('Participants update detected')
-        console.log('Current participants:', participantsArray)
-        console.log('New participants:', newParticipants)
-        console.log('Left participants:', leftParticipants)
+        logger.debug('Participants update detected')
+        logger.debug('Current participants:', participantsArray)
+        logger.debug('New participants:', newParticipants)
+        logger.debug('Left participants:', leftParticipants)
         
         // 現在の参加者リストを更新
         this.currentParticipants = new Set(participantsArray)
@@ -787,7 +814,7 @@ class TranscriptCapture {
       if (countElement) {
         const countText = countElement.textContent?.trim()
         if (countText && /\d+/.test(countText)) {
-          console.log(`Participant count from ${selector}: ${countText}`)
+          logger.debug(`Participant count from ${selector}: ${countText}`)
         }
       }
     }
@@ -796,12 +823,12 @@ class TranscriptCapture {
   private handleCallEnded(reason: string) {
     if (!this.isCallActive) return // 既に処理済み
     
-    console.log('Call ended detected:', reason)
+    logger.info('Call ended detected:', reason)
     this.isCallActive = false
     
     // 記録中の場合は自動停止
     if (this.isRecording) {
-      console.log('Auto-stopping recording due to call end')
+      logger.info('Auto-stopping recording due to call end')
       this.stopRecording()
       this.showNotification('通話が終了したため、記録を自動停止しました', 'info')
       
@@ -830,7 +857,7 @@ class TranscriptCapture {
     if (!this.captionsContainer) return
     
     // より詳細なデバッグログ
-    console.log('Processing captions from container:', this.captionsContainer)
+    logger.debug('Processing captions from container:', this.captionsContainer)
     
     // Google Meetの字幕要素の包括的なセレクタパターン
     const captionSelectors = [
@@ -855,13 +882,13 @@ class TranscriptCapture {
       if (elements.length > 0) {
         captionElements = elements
         usedSelector = selector
-        console.log(`Found caption elements with selector: ${selector}, count: ${elements.length}`)
+        logger.debug(`Found caption elements with selector: ${selector}, count: ${elements.length}`)
         break
       }
     }
     
     if (!captionElements) {
-      console.log('No caption elements found, using fallback')
+      logger.debug('No caption elements found, using fallback')
       // フォールバック: 直接テキストを取得
       const allText = this.captionsContainer.textContent?.trim()
       if (allText && allText !== this.lastCaption && allText.length > 2) {
@@ -871,7 +898,7 @@ class TranscriptCapture {
         let speaker = 'Unknown'
         if (this.currentUserName && (allText.includes('あなた:') || allText.includes('You:') || allText.includes('自分:'))) {
           speaker = this.currentUserName
-          console.log('Fallback: detected "あなた" pattern, using user name:', this.currentUserName)
+          logger.debug('Fallback: detected "あなた" pattern, using user name:', this.currentUserName)
         }
         
         chrome.runtime.sendMessage({
@@ -882,13 +909,13 @@ class TranscriptCapture {
           }
         })
         
-        console.log(`[${speaker}]: ${allText}`)
+        logger.debug(`[${speaker}]: ${allText}`)
       }
       return
     }
     
     captionElements.forEach((element, index) => {
-      console.log(`Processing caption element ${index}:`, element)
+        logger.debug(`Processing caption element ${index}:`, element)
       
       // より詳細なスピーカーとテキストの検出パターン
       const speakerPatterns = [
@@ -920,7 +947,7 @@ class TranscriptCapture {
       for (const pattern of speakerPatterns) {
         speakerElement = element.querySelector(pattern)
         if (speakerElement && speakerElement.textContent?.trim()) {
-          console.log(`Found speaker with pattern ${pattern}:`, speakerElement.textContent)
+          logger.debug(`Found speaker with pattern ${pattern}:`, speakerElement.textContent)
           break
         }
       }
@@ -929,14 +956,14 @@ class TranscriptCapture {
       for (const pattern of textPatterns) {
         textElement = element.querySelector(pattern)
         if (textElement && textElement.textContent?.trim()) {
-          console.log(`Found text with pattern ${pattern}:`, textElement.textContent)
+          logger.debug(`Found text with pattern ${pattern}:`, textElement.textContent)
           break
         }
       }
       
       // より詳細な構造解析
       if (!speakerElement || !textElement) {
-        console.log('Alternative parsing: analyzing element structure')
+        logger.debug('Alternative parsing: analyzing element structure')
         const allChildren = element.children
         
         if (allChildren.length >= 2) {
@@ -946,12 +973,12 @@ class TranscriptCapture {
           
           if (!speakerElement && firstChild.textContent?.trim().includes(':')) {
             speakerElement = firstChild
-            console.log('Found speaker from first child:', firstChild.textContent)
+            logger.debug('Found speaker from first child:', firstChild.textContent)
           }
           
           if (!textElement && secondChild.textContent?.trim()) {
             textElement = secondChild
-            console.log('Found text from second child:', secondChild.textContent)
+            logger.debug('Found text from second child:', secondChild.textContent)
           }
         }
         
@@ -966,7 +993,7 @@ class TranscriptCapture {
             const possibleText = fullText.substring(colonIndex + 1).trim()
             
             if (possibleSpeaker && possibleText) {
-              console.log(`Parsed from full text - Speaker: ${possibleSpeaker}, Text: ${possibleText}`)
+              logger.debug(`Parsed from full text - Speaker: ${possibleSpeaker}, Text: ${possibleText}`)
               
               // 「あなた」を利用者名に置換
               let finalSpeaker = this.replaceYouWithUserName(possibleSpeaker)
@@ -983,7 +1010,7 @@ class TranscriptCapture {
                   }
                 })
                 
-                console.log(`[${finalSpeaker}]: ${possibleText}`)
+                logger.debug(`[${finalSpeaker}]: ${possibleText}`)
               }
               return
             }
@@ -1051,7 +1078,7 @@ class TranscriptCapture {
           }
         })
         
-        console.log(`[${speaker}]: ${cleanText}`)
+        logger.debug(`[${speaker}]: ${cleanText}`)
       }
     })
   }
@@ -1062,7 +1089,7 @@ class TranscriptCapture {
     
     chrome.runtime.sendMessage({ type: 'GENERATE_MINUTES' }, (response) => {
       if (chrome.runtime.lastError) {
-        console.error('Extension context error:', chrome.runtime.lastError)
+        logger.error('Extension context error:', chrome.runtime.lastError)
         this.showNotification('エラー: 拡張機能を再読み込みしてください', 'error')
         this.showLoadingState(false)
         return
@@ -1264,10 +1291,12 @@ class TranscriptCapture {
     notification.textContent = message
     document.body.appendChild(notification)
     
-    setTimeout(() => {
+    const fadeTimeout = setTimeout(() => {
       notification.classList.add('fade-out')
-      setTimeout(() => notification.remove(), 300)
+      const removeTimeout = setTimeout(() => notification.remove(), 300)
+      this.cleanupTimeouts.add(removeTimeout)
     }, 3000)
+    this.cleanupTimeouts.add(fadeTimeout)
   }
 
   private setupTabSwitching() {
@@ -1354,7 +1383,7 @@ class TranscriptCapture {
         throw new Error(response.error || 'ネクストステップの生成に失敗しました')
       }
     } catch (error) {
-      console.error('Error generating next steps:', error)
+      logger.error('Error generating next steps:', error)
       this.showNotification('ネクストステップの生成に失敗しました', 'error')
       listContainer.innerHTML = '<p class="error-message">生成に失敗しました。もう一度お試しください。</p>'
     } finally {
@@ -1407,6 +1436,45 @@ class TranscriptCapture {
     }
   }
 
+  // クリーンアップメソッド
+  private cleanup() {
+    logger.debug('Cleaning up TranscriptCapture')
+    
+    // MutationObserverの停止
+    if (this.observer) {
+      this.observer.disconnect()
+      this.observer = null
+    }
+    
+    if (this.callStatusObserver) {
+      this.callStatusObserver.disconnect()
+      this.callStatusObserver = null
+    }
+    
+    if (this.participantsObserver) {
+      this.participantsObserver.disconnect()
+      this.participantsObserver = null
+    }
+    
+    // タイムアウトのクリア
+    this.cleanupTimeouts.forEach(timeout => clearTimeout(timeout))
+    this.cleanupTimeouts.clear()
+    
+    // インターバルのクリア
+    this.cleanupIntervals.forEach(interval => clearInterval(interval))
+    this.cleanupIntervals.clear()
+    
+    // DOM要素の削除
+    const panel = document.getElementById('minutes-board-control-panel')
+    const minimizedBtn = document.getElementById('minutes-board-minimized')
+    panel?.remove()
+    minimizedBtn?.remove()
+  }
 }
 
-new TranscriptCapture()
+// ページ離脱時のクリーンアップ
+const transcriptCapture = new TranscriptCapture()
+
+window.addEventListener('beforeunload', () => {
+  (transcriptCapture as any).cleanup()
+})

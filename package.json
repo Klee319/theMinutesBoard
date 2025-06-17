@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "node --experimental-modules node_modules/vite/bin/vite.js",
-    "build": "node --experimental-modules node_modules/vite/bin/vite.js build",
+    "build": "node --experimental-modules node_modules/vite/bin/vite.js build && node --experimental-modules node_modules/vite/bin/vite.js build --config vite.config.content.mjs",
+    "build:main": "node --experimental-modules node_modules/vite/bin/vite.js build",
+    "build:content": "node --experimental-modules node_modules/vite/bin/vite.js build --config vite.config.content.mjs",
     "preview": "node --experimental-modules node_modules/vite/bin/vite.js preview",
     "test": "vitest",
     "lint": "tsc --noEmit"

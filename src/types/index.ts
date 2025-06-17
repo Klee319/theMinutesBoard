@@ -21,7 +21,7 @@ export interface Meeting {
 
 export interface Minutes {
   id: string
-  meetingId: string
+  meetingId?: string
   content: string
   generatedAt: Date
   format: 'markdown' | 'plain'
@@ -30,6 +30,13 @@ export interface Minutes {
     participantCount: number
     wordCount: number
   }
+  editHistory?: EditHistoryEntry[]
+}
+
+export interface EditHistoryEntry {
+  timestamp: Date
+  instruction: string
+  transcripts: string[]
 }
 
 export interface UserSettings {
@@ -94,6 +101,7 @@ export type MessageType =
   | 'REALTIME_TRANSCRIPT'
   | 'CALL_ENDED'
   | 'MINUTES_UPDATE'
+  | 'MINUTES_UPDATED'
   | 'PARTICIPANT_UPDATE'
   | 'RECORDING_STOPPED'
   | 'RESTORE_SESSION'
@@ -101,6 +109,9 @@ export type MessageType =
   | 'UPDATE_NEXTSTEP'
   | 'DELETE_NEXTSTEP'
   | 'NEXTSTEPS_GENERATED'
+  | 'AI_EDIT_MINUTES'
+  | 'AI_RESEARCH'
+  | 'CHAT_MESSAGE'
 
 export interface StorageData {
   meetings: Meeting[]

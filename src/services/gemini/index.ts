@@ -224,6 +224,74 @@ ${formattedTranscript}
       throw new Error('ネクストステップの生成に失敗しました')
     }
   }
+
+  async sendChatMessage(message: string, context: any): Promise<string> {
+    if (!this.model) {
+      throw new Error('Gemini API key not configured')
+    }
+
+    try {
+      // チャットコンテキストを構築
+      let chatPrompt = context.systemPrompt || 'あなたは議事録作成AIアシスタントです。'
+      
+      if (context.meetingInfo) {
+        chatPrompt += `\n\n【会議情報】\n`
+        chatPrompt += `- タイトル: ${context.meetingInfo.title}\n`
+        chatPrompt += `- 参加者: ${context.meetingInfo.participants?.join(', ') || '不明'}\n`
+        chatPrompt += `- 発言数: ${context.meetingInfo.transcriptsCount || 0}件\n`
+      }
+
+      if (context.minutes) {
+        chatPrompt += `\n\n【議事録】\n${context.minutes}`
+      }
+
+      if (context.recentTranscripts && context.recentTranscripts.length > 0) {
+        chatPrompt += `\n\n【最近の発言】\n`
+        chatPrompt += context.recentTranscripts.map((t: any) => 
+          `${t.speaker}: ${t.content}`
+        ).join('\n')
+      }
+
+      chatPrompt += `\n\n【ユーザーの質問/要求】\n${message}`
+
+      const result = await this.model.generateContent(chatPrompt)
+      const response = await result.response
+      return response.text()
+    } catch (error) {
+      console.error('Failed to send chat message:', error)
+      throw new Error('チャットメッセージの処理に失敗しました')
+    }
+  }
+
+  async generateText(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<string> {
+    if (!this.model) {
+      throw new Error('Gemini API key not configured')
+    }
+
+    try {
+      // Gemini 1.5では generation configでパラメータを設定
+      const genConfig: any = {}
+      
+      if (options?.maxTokens) {
+        genConfig.maxOutputTokens = options.maxTokens
+      }
+      
+      if (options?.temperature !== undefined) {
+        genConfig.temperature = options.temperature
+      }
+
+      const result = await this.model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: genConfig
+      })
+      
+      const response = await result.response
+      return response.text()
+    } catch (error) {
+      console.error('Failed to generate text:', error)
+      throw new Error('テキストの生成に失敗しました')
+    }
+  }
 }
 
 export const geminiService = new GeminiService()

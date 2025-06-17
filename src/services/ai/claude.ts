@@ -249,4 +249,38 @@ ${formattedTranscript}
       throw new Error('チャットメッセージの送信に失敗しました')
     }
   }
+
+  async generateText(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<string> {
+    try {
+      const response = await fetch(`${this.baseURL}/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.apiKey,
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-haiku-20241022',
+          max_tokens: options?.maxTokens || 2000,
+          temperature: options?.temperature,
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ]
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`Claude API error: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      return data.content[0]?.text || ''
+    } catch (error) {
+      console.error('Failed to generate text with Claude:', error)
+      throw new Error('テキストの生成に失敗しました')
+    }
+  }
 }

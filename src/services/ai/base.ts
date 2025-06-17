@@ -37,6 +37,15 @@ export abstract class BaseAIService {
     context: any
   ): Promise<string>
 
+  // 汎用テキスト生成メソッド
+  abstract generateText(
+    prompt: string,
+    options?: {
+      maxTokens?: number
+      temperature?: number
+    }
+  ): Promise<string>
+
   protected calculateDuration(transcripts: Transcript[]): number {
     if (transcripts.length === 0) return 0
     
@@ -195,20 +204,74 @@ export abstract class BaseAIService {
   // AI応答をNextStep配列に変換
   protected parseNextStepsResponse(response: string, meetingId: string): NextStep[] {
     try {
+      // JSONコードブロックを抽出
       const jsonMatch = response.match(/```json\n?([\s\S]*?)\n?```/)
-      const jsonStr = jsonMatch ? jsonMatch[1] : response
-      const parsed = JSON.parse(jsonStr)
+      let jsonStr = jsonMatch ? jsonMatch[1] : response
       
-      if (!parsed.nextSteps || !Array.isArray(parsed.nextSteps)) {
-        throw new Error('Invalid response format')
+      // JSONの一般的な問題を修正
+      try {
+        // まず直接パースを試みる
+        const parsed = JSON.parse(jsonStr)
+        return this.processNextStepsData(parsed, meetingId)
+      } catch (firstError) {
+        // パースに失敗した場合、修正を試みる
+        console.warn('Initial JSON parse failed, attempting to fix:', firstError)
+        
+        // プロパティ名の修正（ただし既にクォートされているものは除外）
+        jsonStr = jsonStr
+          .replace(/,\s*}/g, '}') // 末尾のカンマを削除
+          .replace(/,\s*]/g, ']') // 配列の末尾のカンマを削除
+          // プロパティ名をクォートで囲む（既にクォートされていないもののみ）
+          .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+          // true/false/nullの値を正しくする
+          .replace(/:\s*True\b/gi, ':true')
+          .replace(/:\s*False\b/gi, ':false')
+          .replace(/:\s*None\b/gi, ':null')
+          // 日付文字列の修正（YYYY-MM-DD形式）
+          .replace(/:\s*"?(\d{4}-\d{2}-\d{2})"?\s*([,}])/g, ':"$1"$2')
+          // 余分なカンマを再度削除
+          .replace(/,(\s*[}\]])/g, '$1')
       }
+      
+      const parsed = JSON.parse(jsonStr)
+      return this.processNextStepsData(parsed, meetingId)
+    } catch (error) {
+      console.error('Failed to parse NextSteps response:', error)
+      console.error('Original response:', response)
+      return []
+    }
+  }
 
-      return parsed.nextSteps.map((item: any) => ({
+  private processNextStepsData(parsed: any, meetingId: string): NextStep[] {
+    if (!parsed.nextSteps || !Array.isArray(parsed.nextSteps)) {
+      throw new Error('Invalid response format')
+    }
+
+    return parsed.nextSteps.map((item: any) => {
+        let dueDate: Date | undefined
+
+        // 期限の設定ロジック
+        if (item.dueDate && item.dueDate !== 'null' && item.dueDate !== '未定') {
+          try {
+            dueDate = new Date(item.dueDate)
+            // Invalid Date チェック
+            if (isNaN(dueDate.getTime())) {
+              dueDate = this.getDefaultDueDate(item.priority)
+            }
+          } catch {
+            dueDate = this.getDefaultDueDate(item.priority)
+          }
+        } else {
+          // AIが期限を設定しなかった場合のフォールバック
+          dueDate = this.getDefaultDueDate(item.priority)
+        }
+
+      return {
         id: this.generateId(),
         meetingId,
         task: item.task || '',
         assignee: item.assignee || undefined,
-        dueDate: item.dueDate ? new Date(item.dueDate) : undefined,
+        dueDate,
         status: item.isPending ? 'pending' : 'confirmed',
         isPending: item.isPending || false,
         priority: item.priority || 'medium',
@@ -216,11 +279,28 @@ export abstract class BaseAIService {
         notes: item.notes || '',
         createdAt: new Date(),
         updatedAt: new Date()
-      }))
-    } catch (error) {
-      console.error('Failed to parse NextSteps response:', error)
-      return []
+      }
+    })
+  }
+
+  // 優先度に基づくデフォルト期限を生成
+  protected getDefaultDueDate(priority?: string): Date {
+    const today = new Date()
+    const defaultDate = new Date(today)
+    
+    switch (priority) {
+      case 'high':
+        defaultDate.setDate(today.getDate() + 3) // 3日後
+        break
+      case 'low':
+        defaultDate.setDate(today.getDate() + 14) // 2週間後
+        break
+      default: // medium
+        defaultDate.setDate(today.getDate() + 7) // 1週間後
+        break
     }
+    
+    return defaultDate
   }
 
   // ランダムIDの生成
