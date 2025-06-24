@@ -1,5 +1,6 @@
 import { ChromeMessage } from '@/types'
 import { logger } from '@/utils/logger'
+import { ChromeErrorHandler, ServiceWorkerKeepAlive } from '@/utils/chrome-error-handler'
 import './styles.css'
 
 class TranscriptCapture {
@@ -21,8 +22,54 @@ class TranscriptCapture {
   private cleanupTimeouts: Set<number> = new Set()
   private cleanupIntervals: Set<number> = new Set()
   
+  // メモリ管理用の変数
+  private transcriptBuffer: any[] = []
+  private lastFlushTime = Date.now()
+  private flushInterval = 5000 // 5秒ごとにバッファをフラッシュ
+  private maxBufferSize = 50 // 最大バッファサイズ
+  
   constructor() {
     this.initAsync()
+    this.setupErrorHandling()
+  }
+  
+  private setupErrorHandling() {
+    // エラーハンドリングのセットアップ
+    ChromeErrorHandler.onReconnectionNeeded(() => {
+      logger.warn('Extension context invalidated - showing reconnection UI')
+      this.showReconnectionNotification()
+    })
+    
+    // Service Workerのキープアライブを開始
+    ServiceWorkerKeepAlive.start()
+    
+    // ページ離脱時にキープアライブを停止
+    window.addEventListener('beforeunload', () => {
+      ServiceWorkerKeepAlive.stop()
+    })
+  }
+  
+  private showReconnectionNotification() {
+    const notification = document.createElement('div')
+    notification.className = 'minutes-notification error'
+    notification.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span>拡張機能との接続が切断されました</span>
+        <button onclick="location.reload()" style="
+          background: white;
+          color: #dc2626;
+          border: 1px solid #dc2626;
+          padding: 4px 12px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 14px;
+        ">再読み込み</button>
+      </div>
+    `
+    document.body.appendChild(notification)
+    
+    // 10秒後に自動的に削除
+    setTimeout(() => notification.remove(), 10000)
   }
   
   private async initAsync() {
@@ -70,9 +117,11 @@ class TranscriptCapture {
       this.updateRecordingUI(true)
       
       // Background scriptに現在のタブIDを通知
-      chrome.runtime.sendMessage({ 
+      ChromeErrorHandler.sendMessage({ 
         type: 'RESTORE_SESSION',
         payload: { tabId: chrome.runtime.id }
+      }).catch(error => {
+        logger.error('Failed to restore session:', error)
       })
     }
   }
@@ -282,8 +331,23 @@ class TranscriptCapture {
       }
     })
     
+    // 定期的なバッファフラッシュ
+    const flushBufferInterval = setInterval(() => {
+      if (this.transcriptBuffer.length > 0) {
+        this.flushTranscriptBuffer()
+      }
+    }, this.flushInterval)
+    this.cleanupIntervals.add(flushBufferInterval)
+    
     chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendResponse) => {
       logger.debug('Content script received message:', message.type)
+      
+      // エラーチェック
+      const error = ChromeErrorHandler.checkLastError()
+      if (error) {
+        sendResponse({ success: false, error: error.message })
+        return true
+      }
       
       switch (message.type) {
         case 'GET_RECORDING_STATUS':
@@ -330,6 +394,50 @@ class TranscriptCapture {
           this.isRecording = false
           this.updateRecordingUI(false)
           this.showNotification('記録を停止しました', 'info')
+          sendResponse({ success: true })
+          break
+          
+        case 'STATE_SYNC':
+          // 状態同期メッセージを受信
+          if (message.payload.isRecording !== this.isRecording) {
+            this.isRecording = message.payload.isRecording
+            this.updateRecordingUI(this.isRecording)
+          }
+          if (message.payload.isMinutesGenerating) {
+            this.showLoadingState(true)
+          } else {
+            this.showLoadingState(false)
+          }
+          sendResponse({ success: true })
+          break
+          
+        case 'MINUTES_GENERATION_STARTED':
+          this.showLoadingState(true)
+          sendResponse({ success: true })
+          break
+          
+        case 'MINUTES_GENERATION_FAILED':
+          this.showLoadingState(false)
+          if (message.payload?.error) {
+            this.showNotification(`エラー: ${message.payload.error}`, 'error')
+          }
+          sendResponse({ success: true })
+          break
+          
+        case 'STORAGE_WARNING':
+          const percentage = message.payload?.percentage || 0
+          this.showNotification(
+            `ストレージ容量が${percentage.toFixed(0)}%に達しました。古いデータは自動削除されます。`,
+            'error'
+          )
+          sendResponse({ success: true })
+          break
+          
+        case 'API_PROGRESS':
+          // API進捗表示の更新
+          if (message.payload?.operation === 'generateMinutes') {
+            this.updateLoadingProgress(message.payload.percentage)
+          }
           sendResponse({ success: true })
           break
           
@@ -421,15 +529,22 @@ class TranscriptCapture {
     const initialParticipants = Array.from(this.currentParticipants)
     logger.debug('Initial participants:', initialParticipants)
     
-    chrome.runtime.sendMessage({ 
+    ChromeErrorHandler.sendMessage({ 
       type: 'START_RECORDING',
       payload: {
         initialParticipants: initialParticipants
       }
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        logger.error('Error sending START_RECORDING:', chrome.runtime.lastError)
-      }
+    }).then(response => {
+      logger.debug('Recording started successfully')
+    }).catch(error => {
+      logger.error('Error sending START_RECORDING:', error)
+      this.showNotification(
+        ChromeErrorHandler.getUserFriendlyMessage(error), 
+        'error'
+      )
+      // 記録状態を元に戻す
+      this.isRecording = false
+      this.updateRecordingUI(false)
     })
     
     this.updateRecordingUI(true)
@@ -461,7 +576,17 @@ class TranscriptCapture {
     if (!this.isRecording) return
     
     this.isRecording = false
-    chrome.runtime.sendMessage({ type: 'STOP_RECORDING' })
+    ChromeErrorHandler.sendMessage({ type: 'STOP_RECORDING' })
+      .then(() => {
+        logger.debug('Recording stopped successfully')
+      })
+      .catch(error => {
+        logger.error('Error stopping recording:', error)
+        this.showNotification(
+          ChromeErrorHandler.getUserFriendlyMessage(error), 
+          'error'
+        )
+      })
     
     this.updateRecordingUI(false)
     
@@ -777,24 +902,28 @@ class TranscriptCapture {
         // 記録中の場合、参加者の変更を記録
         if (this.isRecording) {
           newParticipants.forEach(participant => {
-            chrome.runtime.sendMessage({
+            ChromeErrorHandler.sendMessage({
               type: 'PARTICIPANT_UPDATE',
               payload: {
                 action: 'joined',
                 participant: participant,
                 timestamp: new Date().toISOString()
               }
+            }).catch(error => {
+              logger.error('Failed to send participant update:', error)
             })
           })
           
           leftParticipants.forEach(participant => {
-            chrome.runtime.sendMessage({
+            ChromeErrorHandler.sendMessage({
               type: 'PARTICIPANT_UPDATE',
               payload: {
                 action: 'left',
                 participant: participant,
                 timestamp: new Date().toISOString()
               }
+            }).catch(error => {
+              logger.error('Failed to send participant update:', error)
             })
           })
         }
@@ -833,10 +962,12 @@ class TranscriptCapture {
       this.showNotification('通話が終了したため、記録を自動停止しました', 'info')
       
       // バックグラウンドにも通知
-      chrome.runtime.sendMessage({ 
+      ChromeErrorHandler.sendMessage({ 
         type: 'CALL_ENDED',
         reason: reason,
         timestamp: new Date().toISOString()
+      }).catch(error => {
+        logger.error('Failed to send call ended message:', error)
       })
     }
     
@@ -901,12 +1032,14 @@ class TranscriptCapture {
           logger.debug('Fallback: detected "あなた" pattern, using user name:', this.currentUserName)
         }
         
-        chrome.runtime.sendMessage({
+        ChromeErrorHandler.sendMessage({
           type: 'TRANSCRIPT_UPDATE',
           payload: {
             speaker: speaker,
             content: allText
           }
+        }).catch(error => {
+          logger.error('Failed to send transcript update:', error)
         })
         
         logger.debug(`[${speaker}]: ${allText}`)
@@ -1002,12 +1135,9 @@ class TranscriptCapture {
                 this.lastCaption = possibleText
                 this.currentSpeaker = finalSpeaker
                 
-                chrome.runtime.sendMessage({
-                  type: 'TRANSCRIPT_UPDATE',
-                  payload: {
-                    speaker: finalSpeaker,
-                    content: possibleText
-                  }
+                this.addToTranscriptBuffer({
+                  speaker: finalSpeaker,
+                  content: possibleText
                 })
                 
                 logger.debug(`[${finalSpeaker}]: ${possibleText}`)
@@ -1070,12 +1200,10 @@ class TranscriptCapture {
           }
         }
         
-        chrome.runtime.sendMessage({
-          type: 'TRANSCRIPT_UPDATE',
-          payload: {
-            speaker,
-            content: cleanText
-          }
+        // バッファに追加
+        this.addToTranscriptBuffer({
+          speaker,
+          content: cleanText
         })
         
         logger.debug(`[${speaker}]: ${cleanText}`)
@@ -1087,22 +1215,24 @@ class TranscriptCapture {
     this.showNotification('議事録を生成中...', 'info')
     this.showLoadingState(true)
     
-    chrome.runtime.sendMessage({ type: 'GENERATE_MINUTES' }, (response) => {
-      if (chrome.runtime.lastError) {
-        logger.error('Extension context error:', chrome.runtime.lastError)
-        this.showNotification('エラー: 拡張機能を再読み込みしてください', 'error')
+    ChromeErrorHandler.sendMessage({ type: 'GENERATE_MINUTES' })
+      .then(response => {
+        if (response.success) {
+          this.showNotification('議事録の生成を開始しました')
+          // 成功時もローディング状態は継続（MINUTES_GENERATEDで解除）
+        } else {
+          this.showNotification('エラー: ' + response.error, 'error')
+          this.showLoadingState(false)
+        }
+      })
+      .catch(error => {
+        logger.error('Extension context error:', error)
+        this.showNotification(
+          ChromeErrorHandler.getUserFriendlyMessage(error), 
+          'error'
+        )
         this.showLoadingState(false)
-        return
-      }
-      
-      if (response.success) {
-        this.showNotification('議事録の生成を開始しました')
-        // 成功時もローディング状態は継続（MINUTES_GENERATEDで解除）
-      } else {
-        this.showNotification('エラー: ' + response.error, 'error')
-        this.showLoadingState(false)
-      }
-    })
+      })
   }
   
   private showMinutesPreview(minutes: any) {
@@ -1187,13 +1317,19 @@ class TranscriptCapture {
   private openInNewTab() {
     chrome.storage.local.get(['currentMeetingId'], (result) => {
       if (result.currentMeetingId) {
-        chrome.runtime.sendMessage({
+        ChromeErrorHandler.sendMessage({
           type: 'OPEN_VIEWER_TAB',
           payload: { meetingId: result.currentMeetingId }
-        }, (response) => {
+        }).then(response => {
           if (response?.success && response.tabId) {
             this.viewerTabId = response.tabId
           }
+        }).catch(error => {
+          logger.error('Failed to open viewer tab:', error)
+          this.showNotification(
+            ChromeErrorHandler.getUserFriendlyMessage(error), 
+            'error'
+          )
         })
       }
     })
@@ -1212,6 +1348,45 @@ class TranscriptCapture {
     } else if (minutesText) {
       minutesText.style.opacity = '1'
     }
+  }
+  
+  private updateLoadingProgress(percentage: number) {
+    const loadingText = document.querySelector('.loading-text')
+    if (loadingText) {
+      loadingText.textContent = `AIが処理中... ${percentage}%`
+    }
+  }
+  
+  // トランスクリプトバッファに追加
+  private addToTranscriptBuffer(transcript: { speaker: string; content: string }) {
+    this.transcriptBuffer.push(transcript)
+    
+    // バッファサイズが上限に達したら即座にフラッシュ
+    if (this.transcriptBuffer.length >= this.maxBufferSize) {
+      this.flushTranscriptBuffer()
+    }
+  }
+  
+  // バッファをフラッシュ
+  private flushTranscriptBuffer() {
+    if (this.transcriptBuffer.length === 0) return
+    
+    const transcriptsToSend = [...this.transcriptBuffer]
+    this.transcriptBuffer = [] // バッファをクリア
+    
+    // バッチで送信
+    transcriptsToSend.forEach(transcript => {
+      ChromeErrorHandler.sendMessage({
+        type: 'TRANSCRIPT_UPDATE',
+        payload: transcript
+      }).catch(error => {
+        logger.error('Failed to send transcript update:', error)
+        // 失敗した場合はバッファに戻す
+        this.transcriptBuffer.push(transcript)
+      })
+    })
+    
+    this.lastFlushTime = Date.now()
   }
   
   
@@ -1369,7 +1544,7 @@ class TranscriptCapture {
     listContainer.innerHTML = '<div class="loading">ネクストステップを生成中...</div>'
     
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await ChromeErrorHandler.sendMessage({
         type: 'GENERATE_NEXTSTEPS',
         payload: {
           meetingId: this.currentMinutes.meetingId,
@@ -1440,6 +1615,11 @@ class TranscriptCapture {
   private cleanup() {
     logger.debug('Cleaning up TranscriptCapture')
     
+    // 最後のバッファをフラッシュ
+    if (this.transcriptBuffer.length > 0) {
+      this.flushTranscriptBuffer()
+    }
+    
     // MutationObserverの停止
     if (this.observer) {
       this.observer.disconnect()
@@ -1463,6 +1643,11 @@ class TranscriptCapture {
     // インターバルのクリア
     this.cleanupIntervals.forEach(interval => clearInterval(interval))
     this.cleanupIntervals.clear()
+    
+    // メモリ解放
+    this.transcriptBuffer = []
+    this.currentMinutes = null
+    this.currentParticipants.clear()
     
     // DOM要素の削除
     const panel = document.getElementById('minutes-board-control-panel')

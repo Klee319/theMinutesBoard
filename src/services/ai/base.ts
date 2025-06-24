@@ -1,8 +1,12 @@
 import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
 import { MINUTES_GENERATION_PROMPT, NEXTSTEPS_GENERATION_PROMPT } from '@/system-prompts'
+import { logger } from '@/utils/logger'
 
 export abstract class BaseAIService {
   protected apiKey: string
+  protected defaultTimeout = 30000 // 30秒のデフォルトタイムアウト
+  protected maxRetries = 3
+  protected retryDelay = 1000 // 初期リトライ遅延（ミリ秒）
 
   constructor(apiKey: string) {
     this.apiKey = apiKey
@@ -136,21 +140,31 @@ export abstract class BaseAIService {
   }
 
   // ユーザー設定のプロンプトを取得
-  protected async getEnhancedPrompt(settings?: UserSettings): Promise<string> {
+  protected async getEnhancedPrompt(
+    settings?: UserSettings,
+    transcripts?: Transcript[],
+    meetingInfo?: { startTime?: Date; endTime?: Date }
+  ): Promise<string> {
     // システムプロンプトを必ず含める
     let combinedPrompt = this.getSystemPrompt()
     
-    // ユーザー名のプレースホルダーを置換
-    if (settings?.userName) {
-      combinedPrompt = combinedPrompt.replace(/\{\{userName\}\}/g, settings.userName)
-    } else {
-      // ユーザー名が設定されていない場合は「不明な参加者」とする
-      combinedPrompt = combinedPrompt.replace(/\{\{userName\}\}/g, '不明な参加者')
+    // テンプレート変数を準備
+    const templateVariables: Record<string, any> = {
+      userName: settings?.userName || '不明な参加者',
+      meetingDate: meetingInfo?.startTime || new Date(),
+      speakerMap: transcripts ? this.buildSpeakerMap(transcripts) : {},
     }
+    
+    // テンプレート変数を置換
+    combinedPrompt = this.replaceTemplateVariables(combinedPrompt, templateVariables)
     
     // カスタムプロンプトがある場合は追加
     if (settings?.promptTemplate && settings.promptTemplate.trim()) {
-      combinedPrompt += '\n\n## 追加のカスタム指示\n\n' + settings.promptTemplate
+      const customPrompt = this.replaceTemplateVariables(
+        settings.promptTemplate,
+        templateVariables
+      )
+      combinedPrompt += '\n\n## 追加のカスタム指示\n\n' + customPrompt
     }
     
     return combinedPrompt
@@ -160,19 +174,23 @@ export abstract class BaseAIService {
   protected buildNextStepsPrompt(meeting: Meeting, userPrompt?: string): string {
     let prompt = NEXTSTEPS_GENERATION_PROMPT
 
-    // プレースホルダーの置換
-    prompt = prompt.replace('{{startTime}}', meeting.startTime.toLocaleString('ja-JP'))
-    prompt = prompt.replace('{{participants}}', meeting.participants.join(', '))
-    
     const duration = meeting.duration || this.calculateDuration(meeting.transcripts)
     const hours = Math.floor(duration / 3600)
     const minutes = Math.floor((duration % 3600) / 60)
     const durationText = `${hours > 0 ? `${hours}時間` : ''}${minutes}分`
-    prompt = prompt.replace('{{duration}}', durationText)
-
-    // 発言記録の整形
-    const transcriptsText = this.formatTranscriptsForNextSteps(meeting.transcripts)
-    prompt = prompt.replace('{{transcripts}}', transcriptsText)
+    
+    // テンプレート変数を準備
+    const templateVariables: Record<string, any> = {
+      meetingDate: meeting.startTime,
+      speakerMap: this.buildSpeakerMap(meeting.transcripts),
+      startTime: meeting.startTime.toLocaleString('ja-JP'),
+      participants: meeting.participants.join(', '),
+      duration: durationText,
+      transcripts: this.formatTranscriptsForNextSteps(meeting.transcripts)
+    }
+    
+    // テンプレート変数を置換
+    prompt = this.replaceTemplateVariables(prompt, templateVariables)
 
     // ユーザープロンプトの追加
     if (userPrompt && userPrompt.trim()) {
@@ -306,5 +324,165 @@ export abstract class BaseAIService {
   // ランダムIDの生成
   protected generateId(): string {
     return Date.now().toString(36) + Math.random().toString(36).substr(2)
+  }
+
+  // トランスクリプトから話者マップを構築
+  protected buildSpeakerMap(transcripts: Transcript[]): Record<string, string> {
+    const speakerMap: Record<string, string> = {}
+    const speakers = new Set<string>()
+    
+    // 全ての話者を収集
+    transcripts.forEach(t => {
+      speakers.add(t.speaker)
+    })
+    
+    // 話者IDを生成（Unknown以外）
+    Array.from(speakers).forEach((speaker, index) => {
+      if (speaker !== 'Unknown') {
+        speakerMap[`speaker_${index + 1}`] = speaker
+      }
+    })
+    
+    return speakerMap
+  }
+
+  // プロンプトテンプレートの変数を置換
+  protected replaceTemplateVariables(
+    template: string,
+    variables: Record<string, any>
+  ): string {
+    let result = template
+    
+    // 各変数を置換
+    Object.entries(variables).forEach(([key, value]) => {
+      const regex = new RegExp(`\{\{${key}\}\}`, 'g')
+      
+      // 値の型に応じて適切に変換
+      let replacementValue: string
+      if (value instanceof Date) {
+        // 日付の場合はISO形式（YYYY-MM-DD）に変換
+        replacementValue = value.toISOString().split('T')[0]
+      } else if (typeof value === 'object' && value !== null) {
+        // オブジェクトの場合はJSON文字列に変換
+        replacementValue = JSON.stringify(value, null, 2)
+      } else if (value === undefined || value === null) {
+        replacementValue = ''
+      } else {
+        replacementValue = String(value)
+      }
+      
+      result = result.replace(regex, replacementValue)
+    })
+    
+    return result
+  }
+  
+  // リトライ機能付きのAPIコール
+  protected async callWithRetry<T>(
+    apiCall: () => Promise<T>,
+    operation: string,
+    retries = this.maxRetries
+  ): Promise<T> {
+    let lastError: Error | null = null
+    
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        logger.debug(`${operation}: Attempt ${attempt + 1}/${retries + 1}`)
+        
+        // タイムアウト付きでAPIコールを実行
+        const result = await this.withTimeout(apiCall(), operation)
+        
+        if (attempt > 0) {
+          logger.info(`${operation}: Succeeded after ${attempt} retries`)
+        }
+        
+        return result
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error))
+        logger.warn(`${operation}: Attempt ${attempt + 1} failed: ${lastError.message}`)
+        
+        // リトライ可能なエラーかチェック
+        if (!this.isRetryableError(lastError) || attempt === retries) {
+          break
+        }
+        
+        // エクスポネンシャルバックオフ
+        const delay = this.retryDelay * Math.pow(2, attempt)
+        logger.debug(`${operation}: Waiting ${delay}ms before retry`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+    }
+    
+    logger.error(`${operation}: All attempts failed`)
+    throw lastError || new Error(`${operation} failed`)
+  }
+  
+  // タイムアウト処理
+  protected async withTimeout<T>(
+    promise: Promise<T>,
+    operation: string,
+    timeout = this.defaultTimeout
+  ): Promise<T> {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`${operation} timed out after ${timeout}ms`))
+      }, timeout)
+    })
+    
+    return Promise.race([promise, timeoutPromise])
+  }
+  
+  // リトライ可能なエラーかチェック
+  protected isRetryableError(error: Error): boolean {
+    // ネットワークエラー
+    if (error.message.includes('network') || 
+        error.message.includes('fetch') ||
+        error.message.includes('Failed to fetch')) {
+      return true
+    }
+    
+    // タイムアウトエラー
+    if (error.message.includes('timeout') || 
+        error.message.includes('timed out')) {
+      return true
+    }
+    
+    // レート制限エラー
+    if (error.message.includes('rate limit') || 
+        error.message.includes('429') ||
+        error.message.includes('too many requests')) {
+      return true
+    }
+    
+    // 一時的なサーバーエラー
+    if (error.message.includes('500') || 
+        error.message.includes('502') ||
+        error.message.includes('503') ||
+        error.message.includes('504')) {
+      return true
+    }
+    
+    return false
+  }
+  
+  // API呼び出しの進捗報告
+  protected reportProgress(operation: string, progress: number, total: number): void {
+    const percentage = Math.round((progress / total) * 100)
+    logger.debug(`${operation}: Progress ${percentage}% (${progress}/${total})`)
+    
+    // Chrome拡張のメッセージングAPIを使用して進捗を通知
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      chrome.runtime.sendMessage({
+        type: 'API_PROGRESS',
+        payload: {
+          operation,
+          progress,
+          total,
+          percentage
+        }
+      }).catch(() => {
+        // エラーは無視（ポップアップが開いていない可能性）
+      })
+    }
   }
 }

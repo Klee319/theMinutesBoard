@@ -39,10 +39,16 @@ export class GeminiService extends BaseAIService {
     // プロンプトファイルを優先的に使用した改善されたプロンプト
     const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings, meetingInfo)
     
-    try {
+    // リトライとタイムアウト付きで実行
+    return await this.callWithRetry(async () => {
+      this.reportProgress('generateMinutes', 0, 100)
+      
       const result = await this.model.generateContent(enhancedPrompt)
+      this.reportProgress('generateMinutes', 50, 100)
+      
       const response = await result.response
       const content = response.text()
+      this.reportProgress('generateMinutes', 100, 100)
       
       const minutes: Minutes = {
         id: `minutes_${Date.now()}`,
@@ -58,22 +64,17 @@ export class GeminiService extends BaseAIService {
       }
       
       return minutes
-    } catch (error) {
-      console.error('Failed to generate minutes:', error)
-      throw new Error('議事録の生成に失敗しました')
-    }
+    }, 'generateMinutes')
   }
   
   async validateApiKey(apiKey: string): Promise<boolean> {
-    try {
+    return await this.callWithRetry(async () => {
       const tempAI = new GoogleGenerativeAI(apiKey)
       const tempModel = tempAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
       const result = await tempModel.generateContent('Hello')
       await result.response
       return true
-    } catch (error) {
-      return false
-    }
+    }, 'validateApiKey', 1).catch(() => false)
   }
   
   async checkRateLimit(): Promise<{ 
@@ -93,14 +94,11 @@ export class GeminiService extends BaseAIService {
       throw new Error('Gemini API key not configured')
     }
 
-    try {
+    return await this.callWithRetry(async () => {
       const result = await this.model.generateContent(prompt)
       const response = await result.response
       return response.text()
-    } catch (error) {
-      console.error('Failed to generate content:', error)
-      throw new Error('コンテンツの生成に失敗しました')
-    }
+    }, 'generateContent')
   }
   
   private formatTranscripts(transcripts: Transcript[]): string {
@@ -123,7 +121,7 @@ export class GeminiService extends BaseAIService {
     )
     
     // プロンプトファイルを優先的に使用（設定のプロンプトテンプレートより優先）
-    const basePrompt = await this.getEnhancedPrompt(settings)
+    const basePrompt = await this.getEnhancedPrompt(settings, transcripts, meetingInfo)
     
     return `${basePrompt}
 
@@ -213,16 +211,13 @@ ${formattedTranscript}
 
     const prompt = this.buildNextStepsPrompt(meeting, userPrompt)
     
-    try {
+    return await this.callWithRetry(async () => {
       const result = await this.model.generateContent(prompt)
       const response = await result.response
       const content = response.text()
       
       return this.parseNextStepsResponse(content, meeting.id)
-    } catch (error) {
-      console.error('Failed to generate next steps:', error)
-      throw new Error('ネクストステップの生成に失敗しました')
-    }
+    }, 'generateNextSteps')
   }
 
   async sendChatMessage(message: string, context: any): Promise<string> {
@@ -230,37 +225,34 @@ ${formattedTranscript}
       throw new Error('Gemini API key not configured')
     }
 
-    try {
-      // チャットコンテキストを構築
-      let chatPrompt = context.systemPrompt || 'あなたは議事録作成AIアシスタントです。'
-      
-      if (context.meetingInfo) {
-        chatPrompt += `\n\n【会議情報】\n`
-        chatPrompt += `- タイトル: ${context.meetingInfo.title}\n`
-        chatPrompt += `- 参加者: ${context.meetingInfo.participants?.join(', ') || '不明'}\n`
-        chatPrompt += `- 発言数: ${context.meetingInfo.transcriptsCount || 0}件\n`
-      }
+    // チャットコンテキストを構築
+    let chatPrompt = context.systemPrompt || 'あなたは議事録作成AIアシスタントです。'
+    
+    if (context.meetingInfo) {
+      chatPrompt += `\n\n【会議情報】\n`
+      chatPrompt += `- タイトル: ${context.meetingInfo.title}\n`
+      chatPrompt += `- 参加者: ${context.meetingInfo.participants?.join(', ') || '不明'}\n`
+      chatPrompt += `- 発言数: ${context.meetingInfo.transcriptsCount || 0}件\n`
+    }
 
-      if (context.minutes) {
-        chatPrompt += `\n\n【議事録】\n${context.minutes}`
-      }
+    if (context.minutes) {
+      chatPrompt += `\n\n【議事録】\n${context.minutes}`
+    }
 
-      if (context.recentTranscripts && context.recentTranscripts.length > 0) {
-        chatPrompt += `\n\n【最近の発言】\n`
-        chatPrompt += context.recentTranscripts.map((t: any) => 
-          `${t.speaker}: ${t.content}`
-        ).join('\n')
-      }
+    if (context.recentTranscripts && context.recentTranscripts.length > 0) {
+      chatPrompt += `\n\n【最近の発言】\n`
+      chatPrompt += context.recentTranscripts.map((t: any) => 
+        `${t.speaker}: ${t.content}`
+      ).join('\n')
+    }
 
-      chatPrompt += `\n\n【ユーザーの質問/要求】\n${message}`
+    chatPrompt += `\n\n【ユーザーの質問/要求】\n${message}`
 
+    return await this.callWithRetry(async () => {
       const result = await this.model.generateContent(chatPrompt)
       const response = await result.response
       return response.text()
-    } catch (error) {
-      console.error('Failed to send chat message:', error)
-      throw new Error('チャットメッセージの処理に失敗しました')
-    }
+    }, 'sendChatMessage')
   }
 
   async generateText(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<string> {
@@ -268,7 +260,7 @@ ${formattedTranscript}
       throw new Error('Gemini API key not configured')
     }
 
-    try {
+    return await this.callWithRetry(async () => {
       // Gemini 1.5では generation configでパラメータを設定
       const genConfig: any = {}
       
@@ -287,10 +279,7 @@ ${formattedTranscript}
       
       const response = await result.response
       return response.text()
-    } catch (error) {
-      console.error('Failed to generate text:', error)
-      throw new Error('テキストの生成に失敗しました')
-    }
+    }, 'generateText')
   }
 }
 

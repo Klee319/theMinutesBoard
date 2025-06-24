@@ -1,18 +1,70 @@
 import React, { useState, useEffect } from 'react'
 import { Meeting, NextStep } from '@/types'
 import { logger } from '@/utils/logger'
+import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 
 interface LiveNextStepsPanelProps {
   meeting: Meeting | null
   isLocked: boolean
+  isRecording?: boolean
 }
 
 export default function LiveNextStepsPanel({
   meeting,
-  isLocked
+  isLocked,
+  isRecording = false
 }: LiveNextStepsPanelProps) {
   const [nextSteps, setNextSteps] = useState<NextStep[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
+  const [autoUpdateInterval, setAutoUpdateInterval] = useState<number>(2)
+  const [nextUpdateTime, setNextUpdateTime] = useState<Date | null>(null)
+  const [isAutoUpdating, setIsAutoUpdating] = useState(false)
+
+  // 設定を読み込む
+  useEffect(() => {
+    chrome.storage.sync.get(['settings'], (result) => {
+      if (result.settings?.autoUpdateInterval !== undefined) {
+        setAutoUpdateInterval(result.settings.autoUpdateInterval)
+      }
+    })
+  }, [])
+
+  // 自動更新タイマー
+  useEffect(() => {
+    if (!isRecording || autoUpdateInterval === 0 || isLocked || isGenerating || !meeting?.minutes) {
+      setNextUpdateTime(null)
+      return
+    }
+
+    const intervalMs = autoUpdateInterval * 60 * 1000 // 分をミリ秒に変換
+    const timer = setInterval(() => {
+      if (nextSteps.length > 0) { // 既にネクストステップがある場合のみ自動更新
+        setIsAutoUpdating(true)
+        handleGenerate()
+      }
+    }, intervalMs)
+
+    // 初回の次回更新時刻を設定
+    if (nextSteps.length > 0) {
+      setNextUpdateTime(new Date(Date.now() + intervalMs))
+    }
+
+    return () => clearInterval(timer)
+  }, [isRecording, autoUpdateInterval, isLocked, isGenerating, meeting?.minutes, nextSteps.length])
+
+  // カウントダウンタイマー
+  useEffect(() => {
+    if (!nextUpdateTime || isAutoUpdating) return
+
+    const countdownTimer = setInterval(() => {
+      const now = Date.now()
+      if (nextUpdateTime.getTime() <= now) {
+        clearInterval(countdownTimer)
+      }
+    }, 1000)
+
+    return () => clearInterval(countdownTimer)
+  }, [nextUpdateTime, isAutoUpdating])
 
   useEffect(() => {
     if (meeting?.nextSteps) {
@@ -31,7 +83,7 @@ export default function LiveNextStepsPanel({
     setIsGenerating(true)
     
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await ChromeErrorHandler.sendMessage({
         type: 'GENERATE_NEXTSTEPS',
         payload: {
           meetingId: meeting.id,
@@ -41,14 +93,22 @@ export default function LiveNextStepsPanel({
       
       if (response.success && response.nextSteps) {
         setNextSteps(response.nextSteps)
+        // 自動更新の場合は次回更新時刻を設定
+        if (isAutoUpdating && autoUpdateInterval > 0) {
+          const intervalMs = autoUpdateInterval * 60 * 1000
+          setNextUpdateTime(new Date(Date.now() + intervalMs))
+        }
       } else {
         throw new Error(response.error || 'ネクストステップの生成に失敗しました')
       }
     } catch (error) {
       logger.error('Error generating next steps:', error)
-      alert('ネクストステップの生成に失敗しました')
+      if (!isAutoUpdating) {
+        alert('ネクストステップの生成に失敗しました')
+      }
     } finally {
       setIsGenerating(false)
+      setIsAutoUpdating(false)
     }
   }
 
@@ -59,7 +119,7 @@ export default function LiveNextStepsPanel({
     const newStatus = step.status === 'completed' ? 'pending' : 'completed'
     
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await ChromeErrorHandler.sendMessage({
         type: 'UPDATE_NEXTSTEP',
         payload: {
           meetingId: meeting.id,
@@ -109,7 +169,23 @@ export default function LiveNextStepsPanel({
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-4 border-b bg-gray-50">
-        <h3 className="text-md font-semibold text-gray-900">📋 ネクストステップ</h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-md font-semibold text-gray-900">📋 ネクストステップ</h3>
+          {isRecording && autoUpdateInterval > 0 && nextUpdateTime && nextSteps.length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              {isAutoUpdating ? (
+                <div className="flex items-center gap-1">
+                  <div className="w-2 h-2 border border-green-600 border-t-transparent rounded-full animate-spin"></div>
+                  <span>自動更新中...</span>
+                </div>
+              ) : (
+                <span>
+                  次回更新: {Math.max(0, Math.floor((nextUpdateTime.getTime() - Date.now()) / 1000))}秒後
+                </span>
+              )}
+            </div>
+          )}
+        </div>
         {nextSteps.length === 0 && meeting?.minutes && (
           <button
             onClick={handleGenerate}

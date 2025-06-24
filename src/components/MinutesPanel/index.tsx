@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Minutes, ExportFormat } from '@/types'
 import { storageService } from '@/services/storage'
+import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 import './styles.css'
 
 interface MinutesPanelProps {
@@ -99,8 +100,14 @@ export const MinutesPanel: React.FC<MinutesPanelProps> = ({ meetingId, onClose }
   }, [isDragging])
   
   const handleRegenerate = () => {
-    chrome.runtime.sendMessage({ type: 'GENERATE_MINUTES' })
-    setIsLoading(true)
+    ChromeErrorHandler.sendMessage({ type: 'GENERATE_MINUTES' })
+      .then(() => {
+        setIsLoading(true)
+      })
+      .catch(error => {
+        console.error('Failed to regenerate minutes:', error)
+        alert(ChromeErrorHandler.getUserFriendlyMessage(error))
+      })
   }
   
   return (

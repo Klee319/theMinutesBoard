@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Meeting, NextStep } from '@/types'
+import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 import { logger } from '@/utils/logger'
 
 interface MeetingNextStepsProps {
@@ -23,7 +24,7 @@ export default function MeetingNextSteps({ meeting }: MeetingNextStepsProps) {
     setIsGenerating(true)
     
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await ChromeErrorHandler.sendMessage({
         type: 'GENERATE_NEXTSTEPS',
         payload: {
           meetingId: meeting.id,
@@ -51,7 +52,7 @@ export default function MeetingNextSteps({ meeting }: MeetingNextStepsProps) {
     const newStatus = step.status === 'completed' ? 'pending' : 'completed'
     
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await ChromeErrorHandler.sendMessage({
         type: 'UPDATE_NEXTSTEP',
         payload: {
           meetingId: meeting.id,

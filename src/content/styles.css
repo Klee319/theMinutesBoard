@@ -223,6 +223,25 @@
 
 .minutes-loading .loading-text {
   font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.minutes-loading .progress {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 2px;
+  width: 80%;
+  background: #e0e7ff;
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.minutes-loading .progress-bar {
+  height: 100%;
+  background: #3b82f6;
+  transition: width 0.3s ease;
 }
 
 @keyframes spin {

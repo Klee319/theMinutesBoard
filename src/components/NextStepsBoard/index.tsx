@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Meeting, NextStep } from '@/types'
 import { logger } from '@/utils/logger'
+import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 
 interface NextStepsBoardProps {
   meetings: Meeting[]
@@ -101,7 +102,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
         updates.isPending = false
       }
 
-      const response = await chrome.runtime.sendMessage({
+      const response = await ChromeErrorHandler.sendMessage({
         type: 'UPDATE_NEXTSTEP',
         payload: {
           meetingId,
@@ -249,7 +250,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
     }
 
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await ChromeErrorHandler.sendMessage({
         type: 'DELETE_NEXTSTEP',
         payload: {
           meetingId,

@@ -24,8 +24,9 @@ const AI_MODELS: Record<AIProvider, AIModel[]> = {
   ],
   openrouter: [
     // Latest Anthropic Claude Models (2025)
-    { id: 'anthropic/claude-4-sonnet', name: 'Claude 4 Sonnet', provider: 'openrouter', contextLength: 500000 },
-    { id: 'anthropic/claude-3.7-sonnet', name: 'Claude 3.7 Sonnet', provider: 'openrouter', contextLength: 200000 },
+    { id: 'anthropic/claude-opus-4', name: 'Claude Opus 4', provider: 'openrouter', contextLength: 500000 },
+    { id: 'anthropic/claude-3-opus', name: 'Claude 3 Opus', provider: 'openrouter', contextLength: 200000 },
+    { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku', provider: 'openrouter', contextLength: 200000 },
     { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'openrouter', contextLength: 200000 },
     { id: 'anthropic/claude-3.5-haiku', name: 'Claude 3.5 Haiku', provider: 'openrouter', contextLength: 200000 },
     
@@ -78,6 +79,7 @@ function App() {
     promptTemplate: DEFAULT_PROMPT,
     autoGenerate: false,
     generateInterval: 5,
+    autoUpdateInterval: 2, // 自動更新間隔（分）、0はOFF
     exportFormat: 'markdown',
     theme: 'light',
     userName: '' // ユーザー名を追加
@@ -246,6 +248,7 @@ function App() {
         promptTemplate: DEFAULT_PROMPT,
         autoGenerate: false,
         generateInterval: 5,
+        autoUpdateInterval: 2, // 自動更新間隔（分）、0はOFF
         exportFormat: 'markdown',
         theme: 'light',
         userName: '' // リセット時もユーザー名を含める
@@ -477,6 +480,25 @@ function App() {
                   />
                 </div>
               )}
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  自動更新間隔
+                </label>
+                <select
+                  value={settings.autoUpdateInterval}
+                  onChange={(e) => setSettings({ ...settings, autoUpdateInterval: parseInt(e.target.value) })}
+                  className="input w-48"
+                >
+                  <option value="0">OFF（自動更新しない）</option>
+                  <option value="1">1分</option>
+                  <option value="2">2分（推奨）</option>
+                  <option value="3">3分</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  録音中に議事録とネクストステップを自動的に更新します
+                </p>
+              </div>
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">

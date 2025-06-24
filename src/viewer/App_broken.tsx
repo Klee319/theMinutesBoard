@@ -6,7 +6,6 @@ import MeetingNextSteps from '@/components/MeetingNextSteps'
 import ResizablePanel from '@/components/ResizablePanel'
 import LiveModeLayout from '@/components/LiveModeLayout'
 import { logger } from '@/utils/logger'
-import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 
 function App() {
   const [currentMeeting, setCurrentMeeting] = useState<Meeting | null>(null)
@@ -21,51 +20,10 @@ function App() {
   const [showNextStepsPanel, setShowNextStepsPanel] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [activePanel, setActivePanel] = useState<'main' | 'nextsteps' | 'chat'>('main')
-  const [isRecording, setIsRecording] = useState(false)
 
   useEffect(() => {
     logger.debug('Initial useEffect - loading data')
     loadData()
-    
-    // 初回の状態同期リクエスト
-    ChromeErrorHandler.sendMessage({ type: 'REQUEST_STATE_SYNC' })
-      .then(response => {
-        if (response?.success && response.state) {
-          setIsRecording(response.state.isRecording)
-          setIsMinutesGenerating(response.state.isMinutesGenerating)
-        }
-      })
-      .catch(error => {
-        logger.error('Failed to sync state:', error)
-      })
-    
-    // 状態同期のリスナーを設定
-    const handleMessage = (message: any) => {
-      logger.debug('Viewer received message:', message.type)
-      
-      switch (message.type) {
-        case 'STATE_SYNC':
-          setIsRecording(message.payload.isRecording)
-          setIsMinutesGenerating(message.payload.isMinutesGenerating)
-          break
-        case 'MINUTES_GENERATION_STARTED':
-          setIsMinutesGenerating(true)
-          break
-        case 'MINUTES_GENERATED':
-          setIsMinutesGenerating(false)
-          loadData() // 議事録が生成されたらデータを再読み込み
-          break
-        case 'MINUTES_GENERATION_FAILED':
-          setIsMinutesGenerating(false)
-          break
-        case 'RECORDING_STOPPED':
-          setIsRecording(false)
-          loadData()
-          break
-      }
-    }
-    
-    chrome.runtime.onMessage.addListener(handleMessage)
     
     // モバイル判定
     const checkMobile = () => {
@@ -96,6 +54,49 @@ function App() {
       setCurrentTab('history')
     }
     
+    // デバッグ用: グローバル関数を追加（開発時のみ）
+    if (logger.isDevelopment) {
+      (window as any).createTestMeeting = async () => {
+        const testMeeting: Meeting = {
+          id: `test_${Date.now()}`,
+          title: 'テスト会議 ' + new Date().toLocaleString('ja-JP'),
+          startTime: new Date(Date.now() - 3600000), // 1時間前
+          endTime: new Date(),
+          participants: ['田中太郎', '佐藤花子', '鈴木一郎'],
+          transcripts: [
+            {
+              id: 'trans_1',
+              speaker: '田中太郎',
+              content: 'それでは、本日の会議を始めさせていただきます。',
+              timestamp: new Date(Date.now() - 3500000),
+              meetingId: ''
+            },
+            {
+              id: 'trans_2',
+              speaker: '佐藤花子',
+              content: 'プロジェクトの進捗について報告します。',
+              timestamp: new Date(Date.now() - 3400000),
+              meetingId: ''
+            }
+          ],
+          minutes: {
+            id: 'minutes_1',
+            content: `# テスト会議議事録\n\n## 概要\n- **参加者**: 田中太郎、佐藤花子、鈴木一郎\n- **会議の目的**: プロジェクト進捗確認\n\n## 決定事項\n- **次回の会議は来週月曜日に実施**`,
+            generatedAt: new Date(),
+            format: 'markdown' as const
+          }
+        }
+        
+        const result = await chrome.storage.local.get(['meetings'])
+        const meetings = result.meetings || []
+        meetings.push(testMeeting)
+        await chrome.storage.local.set({ meetings })
+        
+        logger.debug('Test meeting created:', testMeeting.id)
+        loadData() // データを再読み込み
+      }
+    }
+    
     // ストレージの変更を監視
     const handleStorageChange = () => {
       loadData()
@@ -117,7 +118,6 @@ function App() {
       window.removeEventListener('resize', checkMobile)
       chrome.storage.onChanged.removeListener(handleStorageChange)
       document.removeEventListener('click', handleClickOutside)
-      chrome.runtime.onMessage.removeListener(handleMessage)
     }
   }, [])
 
@@ -162,44 +162,35 @@ function App() {
     
     setIsMinutesGenerating(true)
     
-    ChromeErrorHandler.sendMessage({
+    chrome.runtime.sendMessage({
       type: 'GENERATE_MINUTES'
-    })
-      .then(response => {
-        if (!response?.success) {
-          alert('エラー: ' + (response?.error || '議事録の生成に失敗しました'))
-          setIsMinutesGenerating(false)
-        }
-      })
-      .catch(error => {
-        logger.error('Failed to generate minutes:', error)
-        alert(ChromeErrorHandler.getUserFriendlyMessage(error))
+    }, (response) => {
+      if (response?.success) {
+        // 成功通知は不要（自動更新される）
+      } else {
+        alert('エラー: ' + (response?.error || '議事録の生成に失敗しました'))
         setIsMinutesGenerating(false)
-      })
+      }
+    })
   }
 
   const stopRecording = () => {
     if (!currentMeeting?.id) return
     
     if (confirm('記録を停止しますか？')) {
-      ChromeErrorHandler.sendMessage({
+      chrome.runtime.sendMessage({
         type: 'STOP_RECORDING'
+      }, (response) => {
+        if (response?.success) {
+          // 停止成功後、currentMeetingをクリアしてUIを更新
+          setCurrentMeeting(null)
+          setIsMinutesGenerating(false)
+          // データの再読み込み
+          setTimeout(loadData, 500)
+        } else {
+          alert('エラー: ' + (response?.error || '記録の停止に失敗しました'))
+        }
       })
-        .then(response => {
-          if (response?.success) {
-            // 停止成功後、currentMeetingをクリアしてUIを更新
-            setCurrentMeeting(null)
-            setIsMinutesGenerating(false)
-            // データの再読み込み
-            setTimeout(loadData, 500)
-          } else {
-            alert('エラー: ' + (response?.error || '記録の停止に失敗しました'))
-          }
-        })
-        .catch(error => {
-          logger.error('Failed to stop recording:', error)
-          alert(ChromeErrorHandler.getUserFriendlyMessage(error))
-        })
     }
   }
 
@@ -437,14 +428,13 @@ function App() {
           </div>
         )}
 
-        {/* ライブモード - 3パネル縦積みレイアウト */}
+        {/* ライブモード */}
         {isLiveMode && (
           <LiveModeLayout
             meeting={currentMeeting}
             isMinutesGenerating={isMinutesGenerating}
             onGenerateMinutes={generateMinutes}
             onStopRecording={stopRecording}
-            isRecording={isRecording}
           />
         )}
 
@@ -452,58 +442,121 @@ function App() {
         {!isLiveMode && currentTab === 'history' && (
           <div className="flex gap-4 h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
             {/* 履歴サイドバー */}
-            <ResizablePanel
-              position="left"
-              defaultWidth={280}
-              minWidth={200}
-              maxWidth={400}
-              className="flex-shrink-0"
-            >
-              <div className="bg-white rounded-lg shadow-sm p-4 h-full overflow-y-auto">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">会議履歴</h2>
-                <div className="space-y-2">
-                  {allMeetings.length === 0 ? (
-                    <p className="text-sm text-gray-500 text-center py-4">
-                      まだ会議の記録がありません
-                    </p>
-                  ) : (
-                    <>
-                      <p className="text-xs text-gray-600 mb-2">
-                        {allMeetings.length}件の会議があります
+            <div className="w-64 flex-shrink-0">
+              <ResizablePanel
+                position="left"
+                defaultWidth={280}
+                minWidth={200}
+                maxWidth={400}
+                className="flex-shrink-0"
+              >
+                <div className="bg-white rounded-lg shadow-sm p-4 h-full overflow-y-auto">
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4">会議履歴</h2>
+                  <div className="space-y-2">
+                    {allMeetings.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">
+                        まだ会議の記録がありません
                       </p>
-                      {allMeetings
-                        .sort((a, b) => {
-                          try {
-                            return b.title.localeCompare(a.title)
-                          } catch (e) {
-                            return 0
-                          }
-                        })
-                        .map((meeting) => (
-                          <button
-                            key={meeting.id}
-                            onClick={() => handleMeetingSelect(meeting)}
-                            className={`w-full p-3 rounded-lg text-left transition-colors flex flex-col ${
-                              selectedMeeting?.id === meeting.id
-                                ? 'bg-blue-50 border border-blue-200'
-                                : 'hover:bg-gray-50 border border-transparent'
-                            }`}
-                          >
-                            {meeting.minutes && (
-                              <p className="text-sm font-medium text-gray-900 mb-1 truncate" title={extractMeetingTopic(meeting.minutes.content)}>
-                                {extractMeetingTopic(meeting.minutes.content)}
+                    ) : (
+                      <>
+                        <p className="text-xs text-gray-600 mb-2">
+                          {allMeetings.length}件の会議があります
+                        </p>
+                        {allMeetings
+                          .sort((a, b) => {
+                            try {
+                              return b.title.localeCompare(a.title)
+                            } catch (e) {
+                              return 0
+                            }
+                          })
+                          .map((meeting) => (
+                            <button
+                              key={meeting.id}
+                              onClick={() => handleMeetingSelect(meeting)}
+                              className={`w-full p-3 rounded-lg text-left transition-colors flex flex-col ${
+                                selectedMeeting?.id === meeting.id
+                                  ? 'bg-blue-50 border border-blue-200'
+                                  : 'hover:bg-gray-50 border border-transparent'
+                              }`}
+                            >
+                              {meeting.minutes && (
+                                <p className="text-sm font-medium text-gray-900 mb-1 truncate" title={extractMeetingTopic(meeting.minutes.content)}>
+                                  {extractMeetingTopic(meeting.minutes.content)}
+                                </p>
+                              )}
+                              <p className="text-xs text-gray-600">
+                                {meeting.title || 'Unknown date'}
                               </p>
-                            )}
-                            <p className="text-xs text-gray-600">
-                              {meeting.title || 'Unknown date'}
-                            </p>
-                          </button>
-                        ))}
-                    </>
-                  )}
+                            </button>
+                          ))}
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </ResizablePanel>
+              </ResizablePanel>
+            </div>
+
+            {/* メインコンテンツ */}
+            <div className="flex-1 flex gap-4">
+              {/* 議事録表示エリア */}
+              <div className="flex-1">
+                {displayMeeting ? (
+                  <div className="bg-white rounded-lg shadow-sm h-full">
+                    {/* 会議情報ヘッダー */}
+                    <div className="p-6 border-b">
+                position="left"
+                defaultWidth={280}
+                minWidth={200}
+                maxWidth={400}
+                className="flex-shrink-0"
+              >
+                <div className="bg-white rounded-lg shadow-sm p-4 h-full overflow-y-auto">
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4">会議履歴</h2>
+                  <div className="space-y-2">
+                    {allMeetings.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">
+                        まだ会議の記録がありません
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-xs text-gray-600 mb-2">
+                          {allMeetings.length}件の会議があります
+                        </p>
+                        {allMeetings
+                          .sort((a, b) => {
+                            try {
+                              return b.title.localeCompare(a.title)
+                            } catch (e) {
+                              return 0
+                            }
+                          })
+                          .map((meeting) => (
+                            <button
+                              key={meeting.id}
+                              onClick={() => handleMeetingSelect(meeting)}
+                              className={`w-full p-3 rounded-lg text-left transition-colors flex flex-col ${
+                                selectedMeeting?.id === meeting.id
+                                  ? 'bg-blue-50 border border-blue-200'
+                                  : 'hover:bg-gray-50 border border-transparent'
+                              }`}
+                            >
+                              {meeting.minutes && (
+                                <p className="text-sm font-medium text-gray-900 mb-1 truncate" title={extractMeetingTopic(meeting.minutes.content)}>
+                                  {extractMeetingTopic(meeting.minutes.content)}
+                                </p>
+                              )}
+                              <p className="text-xs text-gray-600">
+                                {meeting.title || 'Unknown date'}
+                              </p>
+                            </button>
+                          ))}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </ResizablePanel>
+            )}
 
             {/* メインコンテンツ */}
             <div className="flex-1 flex gap-4">
@@ -532,6 +585,13 @@ function App() {
                         </div>
                         
                         <div className="flex items-center gap-2">
+                          {isLiveMode && (
+                            <div className="flex items-center gap-1">
+                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                              <span className="text-sm text-red-600 font-medium">記録中</span>
+                            </div>
+                          )}
+                          
                           {/* 履歴モードでの会議固有のボタン */}
                           {!isLiveMode && selectedMeeting && (
                             <>
@@ -573,6 +633,22 @@ function App() {
                         <div className="text-center py-12">
                           <div className="text-6xl mb-4">📝</div>
                           <p className="text-xl text-gray-600 mb-4">議事録がまだ生成されていません</p>
+                          {isLiveMode && currentMeeting && (
+                            <button
+                              onClick={generateMinutes}
+                              disabled={isMinutesGenerating}
+                              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center gap-2 mx-auto"
+                            >
+                              {isMinutesGenerating ? (
+                                <>
+                                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                  <span>生成中...</span>
+                                </>
+                              ) : (
+                                '✨ 議事録を生成する'
+                              )}
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -580,9 +656,15 @@ function App() {
                 ) : (
                   <div className="bg-white rounded-lg shadow-sm p-12 text-center h-full flex items-center justify-center">
                     <div>
-                      <div className="text-6xl mb-4">📚</div>
-                      <p className="text-xl text-gray-600 mb-4">会議を選択してください</p>
-                      <p className="text-gray-500">左側のリストから表示したい会議を選んでください</p>
+                      <div className="text-6xl mb-4">
+                        {isLiveMode ? '📹' : '📚'}
+                      </div>
+                      <p className="text-xl text-gray-600 mb-4">
+                        {isLiveMode ? '記録中の会議がありません' : '会議を選択してください'}
+                      </p>
+                      <p className="text-gray-500">
+                        {isLiveMode ? 'Google Meetで記録を開始してください' : '左側のリストから表示したい会議を選んでください'}
+                      </p>
                     </div>
                   </div>
                 )}

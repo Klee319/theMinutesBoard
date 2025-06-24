@@ -49,6 +49,7 @@ export interface UserSettings {
   promptTemplate: string
   autoGenerate: boolean
   generateInterval: number
+  autoUpdateInterval: number // 自動更新間隔（分）、0はOFF
   exportFormat: ExportFormat
   theme: 'light' | 'dark' | 'auto'
   userName?: string // 拡張機能利用者名を追加
@@ -112,6 +113,11 @@ export type MessageType =
   | 'AI_EDIT_MINUTES'
   | 'AI_RESEARCH'
   | 'CHAT_MESSAGE'
+  | 'STATE_SYNC'
+  | 'REQUEST_STATE_SYNC'
+  | 'MINUTES_GENERATION_STARTED'
+  | 'MINUTES_GENERATION_COMPLETED'
+  | 'MINUTES_GENERATION_FAILED'
 
 export interface StorageData {
   meetings: Meeting[]
@@ -172,4 +178,14 @@ export interface NextStep {
   notes: string
   createdAt: Date
   updatedAt: Date
+}
+
+// 共有状態を表す型
+export interface SharedState {
+  isRecording: boolean
+  currentMeetingId: string | null
+  isMinutesGenerating: boolean
+  hasMinutes: boolean
+  recordingTabId: number | null
+  lastUpdate: Date
 }

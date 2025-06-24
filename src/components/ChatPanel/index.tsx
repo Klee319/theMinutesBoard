@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Meeting } from '@/types'
+import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 
 interface ChatMessage {
   id: string
@@ -44,7 +45,7 @@ export default function ChatPanel({ meeting, isLiveMode }: ChatPanelProps) {
 
     try {
       // background scriptにチャットメッセージを送信
-      chrome.runtime.sendMessage({
+      const response = await ChromeErrorHandler.sendMessage({
         type: 'CHAT_MESSAGE',
         payload: {
           meetingId: meeting.id,
@@ -54,35 +55,35 @@ export default function ChatPanel({ meeting, isLiveMode }: ChatPanelProps) {
             messageHistory: messages.slice(-10) // 最近10件の会話履歴
           }
         }
-      }, (response) => {
-        if (response?.success && response.response) {
-          const assistantMessage: ChatMessage = {
-            id: `msg_${Date.now()}_assistant`,
-            role: 'assistant',
-            content: response.response,
-            timestamp: new Date()
-          }
-          setMessages(prev => [...prev, assistantMessage])
-        } else {
-          const errorMessage: ChatMessage = {
-            id: `msg_${Date.now()}_error`,
+      })
+      
+      if (response?.success && response.response) {
+        const assistantMessage: ChatMessage = {
+          id: `msg_${Date.now()}_assistant`,
+          role: 'assistant',
+          content: response.response,
+          timestamp: new Date()
+        }
+        setMessages(prev => [...prev, assistantMessage])
+      } else {
+        const errorMessage: ChatMessage = {
+          id: `msg_${Date.now()}_error`,
             role: 'assistant',
             content: `エラー: ${response?.error || 'メッセージの送信に失敗しました'}`,
             timestamp: new Date()
           }
           setMessages(prev => [...prev, errorMessage])
         }
-        setIsLoading(false)
-      })
     } catch (error) {
       console.error('Error sending message:', error)
       const errorMessage: ChatMessage = {
         id: `msg_${Date.now()}_error`,
         role: 'assistant',
-        content: 'エラー: メッセージの送信に失敗しました',
+        content: ChromeErrorHandler.getUserFriendlyMessage(error),
         timestamp: new Date()
       }
       setMessages(prev => [...prev, errorMessage])
+    } finally {
       setIsLoading(false)
     }
   }

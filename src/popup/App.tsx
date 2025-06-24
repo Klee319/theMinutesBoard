@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Meeting, StorageData, Minutes } from '@/types'
+import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 
 function App() {
   const [isRecording, setIsRecording] = useState(false)
@@ -7,10 +8,50 @@ function App() {
   const [hasApiKey, setHasApiKey] = useState(false)
   const [isInMeet, setIsInMeet] = useState(false)
   const [aiProvider, setAiProvider] = useState<string>('gemini')
+  const [isMinutesGenerating, setIsMinutesGenerating] = useState(false)
   
   useEffect(() => {
     loadData()
     checkCurrentTab()
+    
+    // 初回の状態同期リクエスト
+    ChromeErrorHandler.sendMessage({ type: 'REQUEST_STATE_SYNC' })
+      .then(response => {
+        if (response?.success && response.state) {
+          setIsRecording(response.state.isRecording)
+          setIsMinutesGenerating(response.state.isMinutesGenerating)
+        }
+      })
+      .catch(error => {
+        console.error('Failed to sync state:', error)
+      })
+    
+    // 状態同期のリスナーを設定
+    const handleMessage = (message: any) => {
+      switch (message.type) {
+        case 'STATE_SYNC':
+          setIsRecording(message.payload.isRecording)
+          setIsMinutesGenerating(message.payload.isMinutesGenerating)
+          if (message.payload.currentMeetingId !== currentMeeting?.id) {
+            loadData() // 会議IDが変わった場合はデータを再読み込み
+          }
+          break
+        case 'MINUTES_GENERATION_STARTED':
+          setIsMinutesGenerating(true)
+          break
+        case 'MINUTES_GENERATED':
+        case 'MINUTES_GENERATION_FAILED':
+          setIsMinutesGenerating(false)
+          loadData() // 議事録が生成されたらデータを再読み込み
+          break
+      }
+    }
+    
+    chrome.runtime.onMessage.addListener(handleMessage)
+    
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleMessage)
+    }
   }, [])
   
   const loadData = async () => {
@@ -66,15 +107,15 @@ function App() {
       setIsInMeet(inMeet)
       
       if (inMeet && tab.id) {
-        chrome.tabs.sendMessage(tab.id, { type: 'GET_RECORDING_STATUS' }, (response) => {
-          if (chrome.runtime.lastError) {
-            console.log('Content script not ready:', chrome.runtime.lastError.message)
-            return
-          }
-          if (response?.isRecording !== undefined) {
-            setIsRecording(response.isRecording)
-          }
-        })
+        ChromeErrorHandler.sendMessageToTab(tab.id, { type: 'GET_RECORDING_STATUS' })
+          .then(response => {
+            if (response?.isRecording !== undefined) {
+              setIsRecording(response.isRecording)
+            }
+          })
+          .catch(error => {
+            console.log('Content script not ready:', error)
+          })
       }
     } catch (error) {
       console.error('Error checking tab:', error)
@@ -91,18 +132,17 @@ function App() {
     if (!tab.id) return
     
     const messageType = isRecording ? 'STOP_RECORDING' : 'START_RECORDING'
-    chrome.tabs.sendMessage(tab.id, { type: messageType }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('Error sending message:', chrome.runtime.lastError.message)
-        alert('エラー: Content Scriptが読み込まれていません。ページをリロードしてください。')
-        return
-      }
-      
-      if (response?.success) {
-        setIsRecording(!isRecording)
-        setTimeout(loadData, 500)
-      }
-    })
+    ChromeErrorHandler.sendMessageToTab(tab.id, { type: messageType })
+      .then(response => {
+        if (response?.success) {
+          setIsRecording(!isRecording)
+          setTimeout(loadData, 500)
+        }
+      })
+      .catch(error => {
+        console.error('Error sending message:', error)
+        alert(ChromeErrorHandler.getUserFriendlyMessage(error))
+      })
   }
   
   const handleGenerateMinutes = async () => {
@@ -117,17 +157,16 @@ function App() {
       return
     }
     
-    chrome.tabs.sendMessage(tab.id, { type: 'GENERATE_MINUTES' }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('Error sending message:', chrome.runtime.lastError.message)
-        alert('エラー: Content Scriptが読み込まれていません。ページをリロードしてください。')
-        return
-      }
-      
-      if (!response?.success) {
-        alert('エラー: ' + (response?.error || '議事録の生成に失敗しました'))
-      }
-    })
+    ChromeErrorHandler.sendMessageToTab(tab.id, { type: 'GENERATE_MINUTES' })
+      .then(response => {
+        if (!response?.success) {
+          alert('エラー: ' + (response?.error || '議事録の生成に失敗しました'))
+        }
+      })
+      .catch(error => {
+        console.error('Error sending message:', error)
+        alert(ChromeErrorHandler.getUserFriendlyMessage(error))
+      })
   }
   
   const handleOpenOptions = () => {

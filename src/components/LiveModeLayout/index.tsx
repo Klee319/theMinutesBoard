@@ -14,6 +14,7 @@ interface LiveModeLayoutProps {
   isMinutesGenerating: boolean
   onGenerateMinutes: () => void
   onStopRecording: () => void
+  isRecording?: boolean
 }
 
 // モバイル用タブコンポーネント
@@ -24,7 +25,8 @@ function MobilePanelTabs({
   updateSource,
   onManualUpdate,
   onAiEdit,
-  onStopRecording
+  onStopRecording,
+  isRecording = false
 }: {
   meeting: Meeting | null
   isMinutesGenerating: boolean
@@ -33,6 +35,7 @@ function MobilePanelTabs({
   onManualUpdate: () => void
   onAiEdit: (data: any) => void
   onStopRecording: () => void
+  isRecording?: boolean
 }) {
   const [activeTab, setActiveTab] = useState<'minutes' | 'nextsteps' | 'research' | 'voice'>('minutes')
 
@@ -91,6 +94,7 @@ function MobilePanelTabs({
               isGenerating={isMinutesGenerating || (isUpdating && updateSource === 'manual')}
               isLocked={isUpdating}
               onManualUpdate={onManualUpdate}
+              isRecording={isRecording}
             />
           </div>
         )}
@@ -100,6 +104,7 @@ function MobilePanelTabs({
             <LiveNextStepsPanel 
               meeting={meeting}
               isLocked={isUpdating}
+              isRecording={isRecording}
             />
           </div>
         )}
@@ -139,7 +144,8 @@ export default function LiveModeLayout({
   meeting,
   isMinutesGenerating,
   onGenerateMinutes,
-  onStopRecording
+  onStopRecording,
+  isRecording = false
 }: LiveModeLayoutProps) {
   // 更新処理の排他制御
   const [isUpdating, setIsUpdating] = useState(false)
@@ -232,6 +238,7 @@ export default function LiveModeLayout({
             onManualUpdate={() => handleUpdate('manual')}
             onAiEdit={(data) => handleUpdate('ai-edit', data)}
             onStopRecording={onStopRecording}
+            isRecording={isRecording}
           />
         </div>
       ) : (
@@ -288,6 +295,7 @@ export default function LiveModeLayout({
             <LiveNextStepsPanel 
               meeting={meeting}
               isLocked={isUpdating}
+              isRecording={isRecording}
             />
           </div>
           

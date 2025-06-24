@@ -114,7 +114,7 @@ export class OpenAIService extends BaseAIService {
 
   private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings, meetingInfo?: { startTime?: Date; endTime?: Date }): Promise<string> {
     const formattedTranscript = this.formatTranscriptsEnhanced(transcripts, meetingInfo?.startTime, meetingInfo?.endTime)
-    const basePrompt = await this.getEnhancedPrompt(settings)
+    const basePrompt = await this.getEnhancedPrompt(settings, transcripts, meetingInfo)
     
     return `${basePrompt}
 
