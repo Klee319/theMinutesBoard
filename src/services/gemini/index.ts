@@ -200,7 +200,7 @@ ${formattedTranscript}
 
   // この関数は削除（base.tsのformatTranscriptsEnhancedを使用）
 
-  async generateNextSteps(meeting: Meeting, userPrompt?: string): Promise<NextStep[]> {
+  async generateNextSteps(meeting: Meeting, userPrompt?: string, userName?: string): Promise<NextStep[]> {
     if (!this.model && this.apiKey) {
       this.initialize(this.apiKey)
     }
@@ -209,7 +209,7 @@ ${formattedTranscript}
       throw new Error('Gemini API key not configured')
     }
 
-    const prompt = this.buildNextStepsPrompt(meeting, userPrompt)
+    const prompt = this.buildNextStepsPrompt(meeting, userPrompt, userName)
     
     return await this.callWithRetry(async () => {
       const result = await this.model.generateContent(prompt)

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Meeting } from '@/types'
 import { logger } from '@/utils/logger'
+import { formatMarkdownToHTML } from '@/utils/markdown'
 
 interface LiveMinutesPanelProps {
   meeting: Meeting | null
@@ -8,6 +9,8 @@ interface LiveMinutesPanelProps {
   isLocked: boolean
   onManualUpdate: () => void
   isRecording?: boolean
+  showResearchPanel?: boolean
+  onToggleResearchPanel?: (show: boolean) => void
 }
 
 export default function LiveMinutesPanel({
@@ -15,7 +18,9 @@ export default function LiveMinutesPanel({
   isGenerating,
   isLocked,
   onManualUpdate,
-  isRecording = false
+  isRecording = false,
+  showResearchPanel = true,
+  onToggleResearchPanel
 }: LiveMinutesPanelProps) {
   const [minutes, setMinutes] = useState<string>('')
   const [autoUpdateInterval, setAutoUpdateInterval] = useState<number>(2)
@@ -75,22 +80,6 @@ export default function LiveMinutesPanel({
     }
   }, [meeting])
 
-  const formatMarkdownToHTML = (markdown: string): string => {
-    if (!markdown) return ''
-    
-    return markdown
-      .replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mt-4 mb-2 text-gray-800">$1</h3>')
-      .replace(/^## (.*$)/gim, '<h2 class="text-xl font-semibold mt-6 mb-3 text-gray-900">$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mt-8 mb-4 text-gray-900">$1</h1>')
-      .replace(/^\* (.+)$/gim, '<li class="ml-4 mb-1">$1</li>')
-      .replace(/(<li.*<\/li>)/s, '<ul class="list-disc pl-6 mb-4">$1</ul>')
-      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em class="italic text-gray-700">$1</em>')
-      .replace(/\n\n/g, '</p><p class="mb-3">')
-      .replace(/\n/g, '<br>')
-      .replace(/^(.+)/, '<p class="mb-3">$1')
-      .replace(/(.+)$/, '$1</p>')
-  }
 
   return (
     <div className="flex flex-col h-full">
@@ -112,24 +101,48 @@ export default function LiveMinutesPanel({
             </div>
           )}
         </div>
-        <button
-          onClick={onManualUpdate}
-          disabled={isLocked || isGenerating}
-          className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-            isLocked || isGenerating
-              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              : 'bg-blue-600 text-white hover:bg-blue-700'
-          }`}
-        >
-          {isGenerating ? (
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              <span>更新中...</span>
-            </div>
-          ) : (
-            '🔄 更新'
+        <div className="flex items-center gap-2">
+          {onToggleResearchPanel && (
+            <button
+              onClick={() => {
+                const newShowResearch = !showResearchPanel
+                onToggleResearchPanel(newShowResearch)
+                
+                // モバイルでリサーチタブがアクティブな場合の処理
+                if (!newShowResearch && window.innerWidth < 768) {
+                  // モバイルでリサーチパネルを非表示にした場合、メッセージを送信してタブを切り替え
+                  window.dispatchEvent(new CustomEvent('researchPanelToggled', { detail: { show: false } }))
+                }
+              }}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                showResearchPanel
+                  ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+              title={showResearchPanel ? 'リサーチパネルを非表示' : 'リサーチパネルを表示'}
+            >
+              🔍 リサーチ
+            </button>
           )}
-        </button>
+          <button
+            onClick={onManualUpdate}
+            disabled={isLocked || isGenerating}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+              isLocked || isGenerating
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            {isGenerating ? (
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <span>更新中...</span>
+              </div>
+            ) : (
+              '🔄 更新'
+            )}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
@@ -139,6 +152,14 @@ export default function LiveMinutesPanel({
               className="prose prose-sm max-w-none text-gray-800 leading-relaxed"
               dangerouslySetInnerHTML={{ 
                 __html: formatMarkdownToHTML(minutes)
+                  .replace(/<h3>/g, '<h3 class="text-lg font-semibold mt-4 mb-2 text-gray-800">')
+                  .replace(/<h2>/g, '<h2 class="text-xl font-semibold mt-6 mb-3 text-gray-900">')
+                  .replace(/<h1>/g, '<h1 class="text-2xl font-bold mt-8 mb-4 text-gray-900">')
+                  .replace(/<li>/g, '<li class="ml-4 mb-1">')
+                  .replace(/<ul>/g, '<ul class="list-disc pl-6 mb-4">')
+                  .replace(/<strong>/g, '<strong class="font-semibold text-gray-900">')
+                  .replace(/<em>/g, '<em class="italic text-gray-700">')
+                  .replace(/^([^<].+)$/gm, '<p class="mb-3">$1</p>')
               }}
             />
           ) : (

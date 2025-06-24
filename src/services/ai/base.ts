@@ -32,7 +32,8 @@ export abstract class BaseAIService {
   // ネクストステップ生成メソッド
   abstract generateNextSteps(
     meeting: Meeting,
-    userPrompt?: string
+    userPrompt?: string,
+    userName?: string
   ): Promise<NextStep[]>
 
   // チャットメッセージ送信メソッド
@@ -148,10 +149,23 @@ export abstract class BaseAIService {
     // システムプロンプトを必ず含める
     let combinedPrompt = this.getSystemPrompt()
     
-    // テンプレート変数を準備
+    // 会議時間の計算
+    const duration = transcripts ? this.calculateDuration(transcripts) : 0
+    const hours = Math.floor(duration / 3600)
+    const minutes = Math.floor((duration % 3600) / 60)
+    const durationText = `${hours > 0 ? `${hours}時間` : ''}${minutes}分`
+    
+    // 参加者リストの作成
+    const participants = transcripts ? this.getUniqueParticipants(transcripts) : []
+    
+    // テンプレート変数を準備（両プロンプト共通）
     const templateVariables: Record<string, any> = {
       userName: settings?.userName || '不明な参加者',
       meetingDate: meetingInfo?.startTime || new Date(),
+      startTime: meetingInfo?.startTime ? meetingInfo.startTime.toLocaleString('ja-JP') : new Date().toLocaleString('ja-JP'),
+      participants: participants.join(', '),
+      duration: durationText,
+      transcripts: transcripts ? this.formatTranscriptsEnhanced(transcripts, meetingInfo?.startTime, meetingInfo?.endTime) : '',
       speakerMap: transcripts ? this.buildSpeakerMap(transcripts) : {},
     }
     
@@ -171,7 +185,7 @@ export abstract class BaseAIService {
   }
 
   // ネクストステップ生成用のプロンプトを構築
-  protected buildNextStepsPrompt(meeting: Meeting, userPrompt?: string): string {
+  protected buildNextStepsPrompt(meeting: Meeting, userPrompt?: string, userName?: string): string {
     let prompt = NEXTSTEPS_GENERATION_PROMPT
 
     const duration = meeting.duration || this.calculateDuration(meeting.transcripts)
@@ -179,14 +193,15 @@ export abstract class BaseAIService {
     const minutes = Math.floor((duration % 3600) / 60)
     const durationText = `${hours > 0 ? `${hours}時間` : ''}${minutes}分`
     
-    // テンプレート変数を準備
+    // テンプレート変数を準備（議事録生成と同じセット）
     const templateVariables: Record<string, any> = {
+      userName: userName || '不明な参加者',
       meetingDate: meeting.startTime,
-      speakerMap: this.buildSpeakerMap(meeting.transcripts),
       startTime: meeting.startTime.toLocaleString('ja-JP'),
       participants: meeting.participants.join(', '),
       duration: durationText,
-      transcripts: this.formatTranscriptsForNextSteps(meeting.transcripts)
+      transcripts: this.formatTranscriptsForNextSteps(meeting.transcripts),
+      speakerMap: this.buildSpeakerMap(meeting.transcripts)
     }
     
     // テンプレート変数を置換

@@ -142,7 +142,29 @@ export const MINUTES_GENERATION_PROMPT = `# 議事録生成プロンプト
 - 数値や日付は明確に記録する
 - 議論の流れが分かるように時系列を意識する
 - 個人的な雑談は除外し、業務に関連する内容のみを記録する
-- **重要**: 発言者名が「Unknown」と記録されている場合は、すべて「{{userName}}」に置換して議事録を作成すること`;
+- **重要**: 発言者名が「Unknown」と記録されている場合は、すべて「{{userName}}」に置換して議事録を作成すること
+
+## 利用可能なプレースホルダー
+
+以下のプレースホルダーが利用可能です：
+
+- \`{{userName}}\` - ユーザー名（「Unknown」発言者の置換用）
+- \`{{meetingDate}}\` - 会議日（YYYY-MM-DD形式）
+- \`{{startTime}}\` - 会議開始時刻
+- \`{{participants}}\` - 参加者リスト
+- \`{{duration}}\` - 会議時間
+- \`{{transcripts}}\` - 発言記録
+- \`{{speakerMap}}\` - 話者マップ
+
+## 会議情報
+
+- 開始時刻: {{startTime}}
+- 参加者: {{participants}}
+- 会議時間: {{duration}}
+
+## 発言記録
+
+{{transcripts}}`;
 
 export const NEXTSTEPS_GENERATION_PROMPT = `# ネクストステップ生成プロンプト
 

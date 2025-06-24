@@ -47,11 +47,8 @@ export interface UserSettings {
   openrouterApiKey?: string
   selectedModel?: string
   promptTemplate: string
-  autoGenerate: boolean
-  generateInterval: number
   autoUpdateInterval: number // 自動更新間隔（分）、0はOFF
   exportFormat: ExportFormat
-  theme: 'light' | 'dark' | 'auto'
   userName?: string // 拡張機能利用者名を追加
 }
 
@@ -85,6 +82,7 @@ export interface ChromeMessage {
 
 export type MessageType = 
   | 'START_RECORDING'
+  | 'START_RECORDING_CONFIRMED'
   | 'STOP_RECORDING'
   | 'TRANSCRIPT_UPDATE'
   | 'GENERATE_MINUTES'

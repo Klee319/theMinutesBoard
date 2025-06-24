@@ -3,11 +3,8 @@ import { Meeting } from '@/types'
 import ResizablePanel from '@/components/ResizablePanel'
 import LiveMinutesPanel from '@/components/LiveMinutesPanel'
 import LiveNextStepsPanel from '@/components/LiveNextStepsPanel'
-import VoiceInputPanel from '@/components/VoiceInputPanel'
-import ChatHistoryPanel from '@/components/ChatHistoryPanel'
 import ResearchPanel from '@/components/ResearchPanel'
 import { logger } from '@/utils/logger'
-import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 
 interface LiveModeLayoutProps {
   meeting: Meeting | null
@@ -24,20 +21,39 @@ function MobilePanelTabs({
   isUpdating,
   updateSource,
   onManualUpdate,
-  onAiEdit,
-  onStopRecording,
-  isRecording = false
+  showResearchPanel,
+  onToggleResearchPanel
 }: {
   meeting: Meeting | null
   isMinutesGenerating: boolean
   isUpdating: boolean
-  updateSource: 'manual' | 'ai-edit' | null
+  updateSource: 'manual' | null
   onManualUpdate: () => void
-  onAiEdit: (data: any) => void
-  onStopRecording: () => void
-  isRecording?: boolean
+  showResearchPanel: boolean
+  onToggleResearchPanel: (show: boolean) => void
 }) {
-  const [activeTab, setActiveTab] = useState<'minutes' | 'nextsteps' | 'research' | 'voice'>('minutes')
+  const [activeTab, setActiveTab] = useState<'minutes' | 'nextsteps' | 'research'>('minutes')
+
+  // リサーチパネルが非表示になったときの処理
+  React.useEffect(() => {
+    const handleResearchToggle = (event: CustomEvent) => {
+      if (!event.detail.show && activeTab === 'research') {
+        setActiveTab('minutes')
+      }
+    }
+    
+    window.addEventListener('researchPanelToggled', handleResearchToggle as EventListener)
+    return () => {
+      window.removeEventListener('researchPanelToggled', handleResearchToggle as EventListener)
+    }
+  }, [activeTab])
+
+  // リサーチパネルが非表示になった場合のタブ切り替え
+  React.useEffect(() => {
+    if (!showResearchPanel && activeTab === 'research') {
+      setActiveTab('minutes')
+    }
+  }, [showResearchPanel, activeTab])
 
   return (
     <div className="h-full flex flex-col">
@@ -63,26 +79,18 @@ function MobilePanelTabs({
         >
           ネクストステップ
         </button>
-        <button
-          onClick={() => setActiveTab('research')}
-          className={`px-4 py-2 text-sm font-medium whitespace-nowrap ${
-            activeTab === 'research' 
-              ? 'border-b-2 border-blue-500 text-blue-600' 
-              : 'text-gray-600'
-          }`}
-        >
-          リサーチ
-        </button>
-        <button
-          onClick={() => setActiveTab('voice')}
-          className={`px-4 py-2 text-sm font-medium whitespace-nowrap ${
-            activeTab === 'voice' 
-              ? 'border-b-2 border-blue-500 text-blue-600' 
-              : 'text-gray-600'
-          }`}
-        >
-          音声/チャット
-        </button>
+        {showResearchPanel && (
+          <button
+            onClick={() => setActiveTab('research')}
+            className={`px-4 py-2 text-sm font-medium whitespace-nowrap ${
+              activeTab === 'research' 
+                ? 'border-b-2 border-blue-500 text-blue-600' 
+                : 'text-gray-600'
+            }`}
+          >
+            リサーチ
+          </button>
+        )}
       </div>
 
       {/* タブコンテンツ */}
@@ -94,7 +102,8 @@ function MobilePanelTabs({
               isGenerating={isMinutesGenerating || (isUpdating && updateSource === 'manual')}
               isLocked={isUpdating}
               onManualUpdate={onManualUpdate}
-              isRecording={isRecording}
+              showResearchPanel={showResearchPanel}
+              onToggleResearchPanel={onToggleResearchPanel}
             />
           </div>
         )}
@@ -104,35 +113,16 @@ function MobilePanelTabs({
             <LiveNextStepsPanel 
               meeting={meeting}
               isLocked={isUpdating}
-              isRecording={isRecording}
             />
           </div>
         )}
         
-        {activeTab === 'research' && (
+        {activeTab === 'research' && showResearchPanel && (
           <div className="h-full bg-white rounded-lg shadow-sm">
             <ResearchPanel 
               meeting={meeting}
               isLocked={isUpdating}
             />
-          </div>
-        )}
-        
-        {activeTab === 'voice' && (
-          <div className="h-full flex flex-col gap-4">
-            <div className="h-32 flex-shrink-0">
-              <VoiceInputPanel
-                meeting={meeting}
-                isLocked={isUpdating && updateSource === 'ai-edit'}
-                onAiEdit={onAiEdit}
-                onStopRecording={onStopRecording}
-              />
-            </div>
-            <div className="flex-1 min-h-0">
-              <ChatHistoryPanel
-                meeting={meeting}
-              />
-            </div>
           </div>
         )}
       </div>
@@ -149,28 +139,20 @@ export default function LiveModeLayout({
 }: LiveModeLayoutProps) {
   // 更新処理の排他制御
   const [isUpdating, setIsUpdating] = useState(false)
-  const [updateSource, setUpdateSource] = useState<'manual' | 'ai-edit' | null>(null)
+  const [updateSource, setUpdateSource] = useState<'manual' | null>(null)
 
   // 更新処理の排他制御関数
-  const handleUpdate = async (source: 'manual' | 'ai-edit', updateData?: any) => {
+  const handleUpdate = async () => {
     if (isUpdating) {
-      logger.warn(`Update already in progress by ${updateSource}`)
+      logger.warn('Update already in progress')
       return { success: false, error: '更新処理が進行中です' }
     }
 
     setIsUpdating(true)
-    setUpdateSource(source)
+    setUpdateSource('manual')
 
     try {
-      if (source === 'manual') {
-        // 手動更新処理
-        onGenerateMinutes()
-      } else if (source === 'ai-edit') {
-        // AIチャット編集処理
-        // updateDataに編集指示が含まれる
-        await handleAiEdit(updateData)
-      }
-      
+      onGenerateMinutes()
       return { success: true }
     } catch (error) {
       logger.error('Update failed:', error)
@@ -179,28 +161,6 @@ export default function LiveModeLayout({
       setIsUpdating(false)
       setUpdateSource(null)
     }
-  }
-
-  const handleAiEdit = async (editData: any) => {
-    // AI編集処理の実装
-    // バックグラウンドスクリプトに編集指示を送信
-    return ChromeErrorHandler.sendMessage({
-      type: 'AI_EDIT_MINUTES',
-      payload: {
-        meetingId: meeting?.id,
-        editInstruction: editData.instruction,
-        transcriptData: editData.transcriptData
-      }
-    }).then(response => {
-      if (response?.success) {
-        return response
-      } else {
-        throw new Error(response?.error || 'AI編集に失敗しました')
-      }
-    }).catch(error => {
-      logger.error('AI edit failed:', error)
-      throw new Error(ChromeErrorHandler.getUserFriendlyMessage(error))
-    })
   }
 
   // モバイル判定
@@ -219,145 +179,158 @@ export default function LiveModeLayout({
     }
   }, [])
 
-  // パネルのリサイズ用の状態
-  const [topPanelHeight, setTopPanelHeight] = useState(33) // 33%
-  const [middlePanelHeight, setMiddlePanelHeight] = useState(33) // 33%
-  // bottomPanelHeight は 100 - topPanelHeight - middlePanelHeight で計算
+  // パネルのリサイズ用の状態（横並び用）
+  const [leftPanelWidth, setLeftPanelWidth] = useState(40) // 40%
+  const [middlePanelWidth, setMiddlePanelWidth] = useState(40) // 40%
+  const [rightPanelWidth, setRightPanelWidth] = useState(20) // 20%
+  const [showResearchPanel, setShowResearchPanel] = useState(true) // リサーチパネルの表示/非表示
 
   return (
-    <div className={`${isMobile ? 'flex-col' : 'flex'} gap-4 h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]`}>
-      {/* 左側: 3分割パネル（縦積み） */}
+    <div className="h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
       {isMobile ? (
-        // モバイル版: ResizablePanelなし、タブ切り替え
-        <div className="flex-1 flex flex-col">
+        // モバイル版: タブ切り替え
+        <div className="h-full">
           <MobilePanelTabs
             meeting={meeting}
             isMinutesGenerating={isMinutesGenerating}
             isUpdating={isUpdating}
             updateSource={updateSource}
-            onManualUpdate={() => handleUpdate('manual')}
-            onAiEdit={(data) => handleUpdate('ai-edit', data)}
-            onStopRecording={onStopRecording}
-            isRecording={isRecording}
+            onManualUpdate={handleUpdate}
+            showResearchPanel={showResearchPanel}
+            onToggleResearchPanel={setShowResearchPanel}
           />
         </div>
       ) : (
-        <ResizablePanel
-          position="left"
-          defaultWidth={window.innerWidth * 0.65}
-          minWidth={window.innerWidth * 0.4}
-          maxWidth={window.innerWidth * 0.85}
-          className="flex-shrink-0"
-        >
-          <div className="h-full flex flex-col gap-2">
-          {/* 上部: 議事録パネル */}
+        // デスクトップ版: パネルを横並び（列型）レイアウト
+        <div className="h-full flex gap-2">
+          {/* 左側: 議事録パネル */}
           <div 
             className="bg-white rounded-lg shadow-sm overflow-hidden"
-            style={{ height: `${topPanelHeight}%` }}
+            style={{ 
+              width: showResearchPanel 
+                ? `${leftPanelWidth}%` 
+                : `${(leftPanelWidth / (leftPanelWidth + middlePanelWidth)) * 100}%`
+            }}
           >
             <LiveMinutesPanel 
               meeting={meeting}
               isGenerating={isMinutesGenerating || (isUpdating && updateSource === 'manual')}
               isLocked={isUpdating}
-              onManualUpdate={() => handleUpdate('manual')}
+              onManualUpdate={handleUpdate}
+              showResearchPanel={showResearchPanel}
+              onToggleResearchPanel={setShowResearchPanel}
             />
           </div>
           
-          {/* リサイザー1 */}
+          {/* リサイザー1: 議事録とネクストステップの間 */}
           <div 
-            className="h-1 bg-gray-300 hover:bg-blue-500 cursor-row-resize transition-colors"
-            onMouseDown={(e) => {
-              e.preventDefault()
-              const startY = e.clientY
-              const startTopHeight = topPanelHeight
-              
-              const handleMouseMove = (e: MouseEvent) => {
-                const deltaY = ((e.clientY - startY) / window.innerHeight) * 100
-                const newTopHeight = Math.max(20, Math.min(60, startTopHeight + deltaY))
-                setTopPanelHeight(newTopHeight)
-              }
-              
-              const handleMouseUp = () => {
-                document.removeEventListener('mousemove', handleMouseMove)
-                document.removeEventListener('mouseup', handleMouseUp)
-              }
-              
-              document.addEventListener('mousemove', handleMouseMove)
-              document.addEventListener('mouseup', handleMouseUp)
-            }}
-          />
-          
-          {/* 中部: ネクストステップパネル */}
-          <div 
-            className="bg-white rounded-lg shadow-sm overflow-hidden"
-            style={{ height: `${middlePanelHeight}%` }}
-          >
-            <LiveNextStepsPanel 
-              meeting={meeting}
-              isLocked={isUpdating}
-              isRecording={isRecording}
+              className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                const startX = e.clientX
+                const startLeftWidth = leftPanelWidth
+                const startMiddleWidth = middlePanelWidth
+                
+                const handleMouseMove = (e: MouseEvent) => {
+                  const deltaX = ((e.clientX - startX) / window.innerWidth) * 100
+                  
+                  if (showResearchPanel) {
+                    // リサーチパネルが表示されている場合：左右の幅を調整、リサーチパネルの幅は固定
+                    const totalLeftMiddle = leftPanelWidth + middlePanelWidth
+                    const newLeftWidth = Math.max(15, Math.min(totalLeftMiddle - 15, startLeftWidth + deltaX))
+                    const newMiddleWidth = totalLeftMiddle - newLeftWidth
+                    
+                    setLeftPanelWidth(newLeftWidth)
+                    setMiddlePanelWidth(newMiddleWidth)
+                  } else {
+                    // リサーチパネルが非表示の場合：左右で100%を分割
+                    const newLeftWidth = Math.max(20, Math.min(80, startLeftWidth + deltaX))
+                    const newMiddleWidth = 100 - newLeftWidth
+                    
+                    setLeftPanelWidth(newLeftWidth)
+                    setMiddlePanelWidth(newMiddleWidth)
+                  }
+                }
+                
+                const handleMouseUp = () => {
+                  document.removeEventListener('mousemove', handleMouseMove)
+                  document.removeEventListener('mouseup', handleMouseUp)
+                }
+                
+                document.addEventListener('mousemove', handleMouseMove)
+                document.addEventListener('mouseup', handleMouseUp)
+              }}
             />
-          </div>
           
-          {/* リサイザー2 */}
+          {/* 中央: ネクストステップパネル */}
           <div 
-            className="h-1 bg-gray-300 hover:bg-blue-500 cursor-row-resize transition-colors"
-            onMouseDown={(e) => {
-              e.preventDefault()
-              const startY = e.clientY
-              const startMiddleHeight = middlePanelHeight
-              
-              const handleMouseMove = (e: MouseEvent) => {
-                const deltaY = ((e.clientY - startY) / window.innerHeight) * 100
-                const newMiddleHeight = Math.max(20, Math.min(60, startMiddleHeight + deltaY))
-                const maxMiddleHeight = 100 - topPanelHeight - 20 // 下部パネルの最小高さを確保
-                setMiddlePanelHeight(Math.min(newMiddleHeight, maxMiddleHeight))
-              }
-              
-              const handleMouseUp = () => {
-                document.removeEventListener('mousemove', handleMouseMove)
-                document.removeEventListener('mouseup', handleMouseUp)
-              }
-              
-              document.addEventListener('mousemove', handleMouseMove)
-              document.addEventListener('mouseup', handleMouseUp)
-            }}
-          />
+              className="bg-white rounded-lg shadow-sm overflow-hidden"
+              style={{
+                width: showResearchPanel 
+                  ? `${middlePanelWidth}%` 
+                  : `${(middlePanelWidth / (leftPanelWidth + middlePanelWidth)) * 100}%`
+              }}
+            >
+              <LiveNextStepsPanel 
+                meeting={meeting}
+                isLocked={isUpdating}
+              />
+            </div>
           
-          {/* 下部: リサーチパネル */}
-          <div 
-            className="bg-white rounded-lg shadow-sm overflow-hidden flex-1"
-            style={{ minHeight: '20%' }}
-          >
-            <ResearchPanel 
-              meeting={meeting}
-              isLocked={isUpdating}
-            />
-          </div>
+          {/* リサイザー2: ネクストステップとリサーチの間（リサーチパネル表示時のみ） */}
+          {showResearchPanel && (
+              <div 
+                className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  const startX = e.clientX
+                  const startRightWidth = rightPanelWidth
+                  
+                  const handleMouseMove = (e: MouseEvent) => {
+                    const deltaX = ((e.clientX - startX) / window.innerWidth) * 100
+                    const newRightWidth = Math.max(15, Math.min(50, startRightWidth - deltaX))
+                    const deltaWidth = newRightWidth - rightPanelWidth
+                    
+                    // リサーチパネルの幅変更分を議事録とネクストステップで等分
+                    const leftAdjustment = deltaWidth / 2
+                    const middleAdjustment = deltaWidth / 2
+                    
+                    const newLeftWidth = Math.max(15, leftPanelWidth - leftAdjustment)
+                    const newMiddleWidth = Math.max(15, middlePanelWidth - middleAdjustment)
+                    
+                    // 合計が100%になるよう調整
+                    const total = newLeftWidth + newMiddleWidth + newRightWidth
+                    if (total <= 100) {
+                      setLeftPanelWidth(newLeftWidth)
+                      setMiddlePanelWidth(newMiddleWidth)
+                      setRightPanelWidth(newRightWidth)
+                    }
+                  }
+                  
+                  const handleMouseUp = () => {
+                    document.removeEventListener('mousemove', handleMouseMove)
+                    document.removeEventListener('mouseup', handleMouseUp)
+                  }
+                  
+                  document.addEventListener('mousemove', handleMouseMove)
+                  document.addEventListener('mouseup', handleMouseUp)
+                }}
+              />
+          )}
+          
+          {/* 右側: リサーチパネル（表示時のみ） */}
+          {showResearchPanel && (
+              <div 
+                className="bg-white rounded-lg shadow-sm overflow-hidden"
+                style={{ width: `${rightPanelWidth}%` }}
+              >
+                <ResearchPanel 
+                  meeting={meeting}
+                  isLocked={isUpdating}
+                />
+              </div>
+          )}
         </div>
-      </ResizablePanel>
-      )}
-
-      {/* 右側: 音声入力とチャット履歴 (デスクトップのみ) */}
-      {!isMobile && (
-        <div className="flex-1 flex flex-col gap-4">
-        {/* 音声コントロールパネル */}
-        <div className="h-32 flex-shrink-0">
-          <VoiceInputPanel
-            meeting={meeting}
-            isLocked={isUpdating && updateSource === 'ai-edit'}
-            onAiEdit={(data) => handleUpdate('ai-edit', data)}
-            onStopRecording={onStopRecording}
-          />
-        </div>
-
-        {/* チャット履歴パネル */}
-        <div className="flex-1 min-h-0">
-          <ChatHistoryPanel
-            meeting={meeting}
-          />
-        </div>
-      </div>
       )}
     </div>
   )

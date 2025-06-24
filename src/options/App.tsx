@@ -77,11 +77,8 @@ function App() {
     openrouterApiKey: '',
     selectedModel: '',
     promptTemplate: DEFAULT_PROMPT,
-    autoGenerate: false,
-    generateInterval: 5,
     autoUpdateInterval: 2, // 自動更新間隔（分）、0はOFF
     exportFormat: 'markdown',
-    theme: 'light',
     userName: '' // ユーザー名を追加
   })
   const [saved, setSaved] = useState(false)
@@ -246,11 +243,8 @@ function App() {
         openrouterApiKey: '',
         selectedModel: 'gemini-1.5-flash',
         promptTemplate: DEFAULT_PROMPT,
-        autoGenerate: false,
-        generateInterval: 5,
         autoUpdateInterval: 2, // 自動更新間隔（分）、0はOFF
         exportFormat: 'markdown',
-        theme: 'light',
         userName: '' // リセット時もユーザー名を含める
       })
       setApiKeyStatus('unchecked')
@@ -448,38 +442,6 @@ function App() {
           <div>
             <h2 className="text-xl font-semibold text-gray-800 mb-4">議事録生成設定</h2>
             <div className="space-y-4">
-              <div>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={settings.autoGenerate}
-                    onChange={(e) => setSettings({ ...settings, autoGenerate: e.target.checked })}
-                    className="rounded text-primary-600 focus:ring-primary-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700">
-                    自動生成を有効にする
-                  </span>
-                </label>
-                <p className="text-xs text-gray-500 mt-1 ml-6">
-                  指定した間隔で自動的に議事録を生成します
-                </p>
-              </div>
-              
-              {settings.autoGenerate && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    生成間隔（分）
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="30"
-                    value={settings.generateInterval}
-                    onChange={(e) => setSettings({ ...settings, generateInterval: parseInt(e.target.value) || 5 })}
-                    className="input w-24"
-                  />
-                </div>
-              )}
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -494,6 +456,18 @@ function App() {
                   <option value="1">1分</option>
                   <option value="2">2分（推奨）</option>
                   <option value="3">3分</option>
+                  <option value="4">4分</option>
+                  <option value="5">5分</option>
+                  <option value="6">6分</option>
+                  <option value="7">7分</option>
+                  <option value="8">8分</option>
+                  <option value="9">9分</option>
+                  <option value="10">10分</option>
+                  <option value="11">11分</option>
+                  <option value="12">12分</option>
+                  <option value="13">13分</option>
+                  <option value="14">14分</option>
+                  <option value="15">15分</option>
                 </select>
                 <p className="text-xs text-gray-500 mt-1">
                   録音中に議事録とネクストステップを自動的に更新します
@@ -559,25 +533,6 @@ function App() {
             </div>
           </div>
           
-          <div>
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">表示設定</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  テーマ
-                </label>
-                <select
-                  value={settings.theme}
-                  onChange={(e) => setSettings({ ...settings, theme: e.target.value as 'light' | 'dark' | 'auto' })}
-                  className="input w-48"
-                >
-                  <option value="light">ライト</option>
-                  <option value="dark">ダーク</option>
-                  <option value="auto">自動</option>
-                </select>
-              </div>
-            </div>
-          </div>
           
           <div className="flex justify-end pt-4 border-t">
             <button

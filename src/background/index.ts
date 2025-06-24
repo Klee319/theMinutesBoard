@@ -223,10 +223,21 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
         sendResponse({ success: true, pong: true })
         return false
       case 'START_RECORDING':
+        // Popupからのリクエスト：Content Scriptに字幕チェックを依頼
         handleStartRecording(sender.tab?.id, message.payload)
           .then(() => sendResponse({ success: true }))
           .catch(error => {
             logger.logError(error, 'START_RECORDING')
+            sendResponse({ success: false, error: error instanceof Error ? error.message : 'Recording failed' })
+          })
+        return true
+        
+      case 'START_RECORDING_CONFIRMED':
+        // Content Scriptからの確認済みリクエスト：直接記録開始処理を行う
+        handleActualStartRecording(sender.tab?.id, message.payload)
+          .then(() => sendResponse({ success: true }))
+          .catch(error => {
+            logger.logError(error, 'START_RECORDING_CONFIRMED')
             sendResponse({ success: false, error: error instanceof Error ? error.message : 'Recording failed' })
           })
         return true
@@ -382,6 +393,21 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
   }
 })
 
+// Content Scriptからの記録開始リクエストを処理（字幕チェック済み）
+async function handleActualStartRecording(tabId?: number, payload?: any): Promise<void> {
+  if (!tabId) {
+    throw new Error('No tab ID provided')
+  }
+  
+  // 既に記録中の場合は新しい記録を開始しない
+  if (currentMeetingId && recordingTabId === tabId) {
+    logger.debug('Already recording in this tab')
+    return
+  }
+  
+  logger.info('Starting recording after captions check passed')
+
+// Popupからの記録開始リクエストを処理（Content Scriptに字幕チェックを依頼）
 async function handleStartRecording(tabId?: number, payload?: any): Promise<void> {
   if (!tabId) {
     throw new Error('No tab ID provided')
@@ -392,6 +418,30 @@ async function handleStartRecording(tabId?: number, payload?: any): Promise<void
     logger.debug('Already recording in this tab')
     return
   }
+  
+  // Content Scriptに字幕チェックを依頼
+  try {
+    const response = await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tabId, { type: 'START_RECORDING', payload }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message))
+        } else {
+          resolve(response)
+        }
+      })
+    })
+    
+    if (!response || !response.success) {
+      throw new Error(response?.error || '字幕が有効になっていません。Google Meetの字幕をONにしてください。')
+    }
+    
+    // 字幕チェックが成功した場合のみ実際の記録開始を行う
+    await handleActualStartRecording(tabId, payload)
+  } catch (error) {
+    logger.error('Failed to start recording:', error)
+    throw error
+  }
+}
   
   currentMeetingId = generateMeetingId()
   recordingTabId = tabId
@@ -657,15 +707,32 @@ async function handleGenerateMinutes(): Promise<any> {
             // 選択されたAIサービスを作成
             const aiService = AIServiceFactory.createService(mergedSettings)
         
+            // 時刻データの正規化（Dateオブジェクトか文字列かの判定）
+            const normalizeDate = (dateValue: any): Date => {
+              if (!dateValue) return new Date()
+              if (dateValue instanceof Date) {
+                return isNaN(dateValue.getTime()) ? new Date() : dateValue
+              }
+              try {
+                const parsed = new Date(dateValue)
+                return isNaN(parsed.getTime()) ? new Date() : parsed
+              } catch {
+                return new Date()
+              }
+            }
+            
+            const startTime = normalizeDate(currentMeeting.startTime)
+            const endTime = normalizeDate(currentMeeting.endTime)
+            
             // 議事録を生成（会議の時刻情報を含める）
             const minutes = await aiService.generateMinutes(
               currentMeeting.transcripts,
               mergedSettings,
-          {
-            startTime: new Date(currentMeeting.startTime),
-            endTime: currentMeeting.endTime ? new Date(currentMeeting.endTime) : new Date()
-          }
-        )
+              {
+                startTime,
+                endTime
+              }
+            )
         
         // 生成された議事録を保存
         const meetingIndex = meetings.findIndex(m => m.id === currentMeetingId)
@@ -984,7 +1051,7 @@ async function handleGenerateNextSteps(payload: any): Promise<any> {
     
     // AIサービスを使用してネクストステップを生成
     const aiService = AIServiceFactory.createService(settings)
-    const nextSteps = await aiService.generateNextSteps(meeting, userPrompt)
+    const nextSteps = await aiService.generateNextSteps(meeting, userPrompt, settings.userName)
     
     // 生成されたネクストステップを会議データに追加
     meeting.nextSteps = nextSteps
@@ -1410,7 +1477,10 @@ async function performStorageCleanup(): Promise<void> {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
     
     const meetings = await storageService.getMeetings()
-    const oldMeetings = meetings.filter(m => new Date(m.startTime) < thirtyDaysAgo)
+    const oldMeetings = meetings.filter(m => {
+      const meetingDate = m.startTime instanceof Date ? m.startTime : new Date(m.startTime || Date.now())
+      return meetingDate < thirtyDaysAgo
+    })
     
     for (const meeting of oldMeetings) {
       await storageService.deleteMeeting(meeting.id)
@@ -1434,9 +1504,13 @@ async function performEmergencyCleanup(): Promise<void> {
     
     // 最も古い会議から削除（全体の30%）
     const deleteCount = Math.max(1, Math.floor(meetings.length * 0.3))
-    const sortedMeetings = meetings.sort((a, b) => 
-      new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-    )
+    
+    // 日付処理を安全に行う
+    const sortedMeetings = meetings.sort((a, b) => {
+      const dateA = a.startTime instanceof Date ? a.startTime : new Date(a.startTime || Date.now())
+      const dateB = b.startTime instanceof Date ? b.startTime : new Date(b.startTime || Date.now())
+      return dateA.getTime() - dateB.getTime()
+    })
     
     for (let i = 0; i < deleteCount && i < sortedMeetings.length; i++) {
       await storageService.deleteMeeting(sortedMeetings[i].id)

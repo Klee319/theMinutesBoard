@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react'
-import { Meeting, Minutes, Transcript } from '@/types'
-import ChatPanel from '@/components/ChatPanel'
+import { Meeting, Minutes } from '@/types'
 import NextStepsBoard from '@/components/NextStepsBoard'
 import MeetingNextSteps from '@/components/MeetingNextSteps'
 import ResizablePanel from '@/components/ResizablePanel'
 import LiveModeLayout from '@/components/LiveModeLayout'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
+import { formatMarkdownToHTML } from '@/utils/markdown'
+import { extractMeetingTopic } from '@/utils/meeting-utils'
 
 function App() {
   const [currentMeeting, setCurrentMeeting] = useState<Meeting | null>(null)
@@ -17,10 +18,8 @@ function App() {
   const [isDownloadDropdownOpen, setIsDownloadDropdownOpen] = useState(false)
   const [isMinutesGenerating, setIsMinutesGenerating] = useState(false)
   const [currentTab, setCurrentTab] = useState<'history' | 'nextsteps'>('history')
-  const [showChatPanel, setShowChatPanel] = useState(false)
   const [showNextStepsPanel, setShowNextStepsPanel] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  const [activePanel, setActivePanel] = useState<'main' | 'nextsteps' | 'chat'>('main')
   const [isRecording, setIsRecording] = useState(false)
 
   useEffect(() => {
@@ -238,61 +237,6 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  const formatMarkdownToHTML = (markdown: string): string => {
-    return markdown
-      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-      .replace(/^\* (.+)$/gim, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-      .replace(/\*\*(.*)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*)\*/g, '<em>$1</em>')
-      .replace(/\n/g, '<br>')
-  }
-
-  const extractMeetingTopic = (content: string): string => {
-    // 会議の目的を優先的に抽出
-    const purposePatterns = [
-      /会議の目的[:：]\s*(.+?)[\n\r]/,
-      /\*\*会議の目的\*\*[:：]\s*(.+?)[\n\r]/,
-      /目的[:：]\s*(.+?)[\n\r]/
-    ]
-    
-    for (const pattern of purposePatterns) {
-      const match = content.match(pattern)
-      if (match && match[1]) {
-        const purpose = match[1].trim()
-        return purpose.length > 30 ? purpose.substring(0, 30) + '...' : purpose
-      }
-    }
-    
-    // 次に主要議題を探す
-    const topicPatterns = [
-      /## 主要議題と討議内容\s*\n+### \d+\.\s*(.+?)[\n\r]/,
-      /### \d+\.\s*(.+?)[\n\r]/,
-      /議題[:：]\s*(.+?)[\n\r]/,
-      /主な議題[:：]\s*(.+?)[\n\r]/
-    ]
-    
-    for (const pattern of topicPatterns) {
-      const match = content.match(pattern)
-      if (match && match[1]) {
-        const topic = match[1].trim()
-        return topic.length > 30 ? topic.substring(0, 30) + '...' : topic
-      }
-    }
-    
-    // 決定事項から抽出
-    const decisionPattern = /## 決定事項\s*\n+[\-\*]\s*\*\*(.+?)\*\*/
-    const decisionMatch = content.match(decisionPattern)
-    if (decisionMatch && decisionMatch[1]) {
-      const decision = decisionMatch[1].trim()
-      return decision.length > 30 ? decision.substring(0, 30) + '...' : decision
-    }
-    
-    // それでも見つからない場合は「内容なし」
-    return '議題情報なし'
-  }
 
   const displayMeeting = selectedMeeting || currentMeeting
 
@@ -490,8 +434,8 @@ function App() {
                             }`}
                           >
                             {meeting.minutes && (
-                              <p className="text-sm font-medium text-gray-900 mb-1 truncate" title={extractMeetingTopic(meeting.minutes.content)}>
-                                {extractMeetingTopic(meeting.minutes.content)}
+                              <p className="text-sm font-medium text-gray-900 mb-1 truncate" title={extractMeetingTopic(meeting)}>
+                                {extractMeetingTopic(meeting)}
                               </p>
                             )}
                             <p className="text-xs text-gray-600">
@@ -545,16 +489,6 @@ function App() {
                               >
                                 📋 ネクストステップ
                               </button>
-                              <button
-                                onClick={() => setShowChatPanel(!showChatPanel)}
-                                className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                                  showChatPanel
-                                    ? 'bg-blue-100 text-blue-800'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                }`}
-                              >
-                                💬 AIチャット
-                              </button>
                             </>
                           )}
                         </div>
@@ -602,32 +536,6 @@ function App() {
                 </ResizablePanel>
               )}
 
-              {/* 会議固有のAIチャットパネル（履歴モード） */}
-              {!isLiveMode && selectedMeeting && showChatPanel && (
-                <ResizablePanel
-                  position="right"
-                  defaultWidth={380}
-                  minWidth={300}
-                  maxWidth={500}
-                >
-                  <div className="bg-white rounded-lg shadow-sm h-full">
-                    <div className="flex items-center justify-between p-4 border-b">
-                      <h2 className="text-lg font-semibold text-gray-900">AIチャット</h2>
-                      <button
-                        onClick={() => setShowChatPanel(false)}
-                        className="text-gray-400 hover:text-gray-600"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                    <div className="h-[calc(100%-60px)]">
-                      <ChatPanel meeting={selectedMeeting} isLiveMode={false} />
-                    </div>
-                  </div>
-                </ResizablePanel>
-              )}
             </div>
           </div>
         )}

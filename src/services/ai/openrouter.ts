@@ -170,9 +170,10 @@ ${formattedTranscript}
 
   async generateNextSteps(
     meeting: Meeting,
-    userPrompt?: string
+    userPrompt?: string,
+    userName?: string
   ): Promise<NextStep[]> {
-    const prompt = this.buildNextStepsPrompt(meeting, userPrompt)
+    const prompt = this.buildNextStepsPrompt(meeting, userPrompt, userName)
     
     try {
       const response = await fetch(`${this.baseURL}/chat/completions`, {

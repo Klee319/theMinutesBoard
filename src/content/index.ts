@@ -1,6 +1,7 @@
 import { ChromeMessage } from '@/types'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler, ServiceWorkerKeepAlive } from '@/utils/chrome-error-handler'
+import { formatMarkdownToHTML } from '@/utils/markdown'
 import './styles.css'
 
 class TranscriptCapture {
@@ -355,12 +356,26 @@ class TranscriptCapture {
           break
           
         case 'START_RECORDING':
+          // 字幕チェックを再実行
+          this.checkForCaptions()
+          
           if (!this.captionsContainer) {
-            this.showNotification('字幕が有効になっていません。字幕をONにしてください。', 'error')
-            sendResponse({ success: false, error: '字幕が有効になっていません' })
+            logger.warn('Captions not available, cannot start recording')
+            this.showNotification('字幕が有効になっていません。Google Meetの字幕をONにしてから記録を開始してください。', 'error')
+            sendResponse({ success: false, error: '字幕が有効になっていません。Google Meetの字幕をONにしてください。' })
           } else {
-            this.startRecording()
-            sendResponse({ success: true })
+            logger.info('Captions container found, notifying background script')
+            // Background scriptに字幕チェック済みの記録開始を通知
+            chrome.runtime.sendMessage({
+              type: 'START_RECORDING_CONFIRMED',
+              payload: message.payload
+            }).then(() => {
+              this.startRecording()
+              sendResponse({ success: true })
+            }).catch(error => {
+              logger.error('Failed to start recording via background:', error)
+              sendResponse({ success: false, error: error.message })
+            })
           }
           break
           
@@ -497,9 +512,16 @@ class TranscriptCapture {
     for (const selector of captionSelectors) {
       const element = document.querySelector(selector)
       if (element && (element as HTMLElement).offsetParent !== null) {
-        this.captionsContainer = element
-        logger.debug('Captions container found with selector:', selector)
-        return true
+        // 実際に字幕が表示されているかを確認
+        const hasVisibleContent = element.textContent && element.textContent.trim().length > 0
+        const isVisible = element.offsetWidth > 0 && element.offsetHeight > 0
+        
+        if (isVisible) {
+          this.captionsContainer = element
+          logger.debug('Captions container found with selector:', selector)
+          logger.debug('Caption element visible:', isVisible, 'has content:', hasVisibleContent)
+          return true
+        }
       }
     }
     return false
@@ -1310,7 +1332,7 @@ class TranscriptCapture {
   private updateMinutesContent(minutes: any) {
     const minutesText = document.getElementById('minutes-text')
     if (minutesText) {
-      minutesText.innerHTML = this.formatMarkdownToHTML(minutes.content)
+      minutesText.innerHTML = formatMarkdownToHTML(minutes.content)
     }
   }
   
@@ -1448,17 +1470,6 @@ class TranscriptCapture {
     this.showNotification(`${format.toUpperCase()}ファイルをダウンロードしました`, 'success')
   }
   
-  private formatMarkdownToHTML(markdown: string): string {
-    return markdown
-      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-      .replace(/^\* (.+)$/gim, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-      .replace(/\*\*(.*)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*)\*/g, '<em>$1</em>')
-      .replace(/\n/g, '<br>')
-  }
   
   private showNotification(message: string, type: 'success' | 'error' | 'info' = 'success') {
     const notification = document.createElement('div')
