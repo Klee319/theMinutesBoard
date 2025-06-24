@@ -16,6 +16,12 @@ interface RecordingState {
   capturedTranscripts: string[]
 }
 
+interface ConfirmationDialogState {
+  isOpen: boolean
+  transcripts: string[]
+  mode: 'edit' | 'research' | null
+}
+
 export default function VoiceInputPanel({
   meeting,
   isLocked,
@@ -27,6 +33,12 @@ export default function VoiceInputPanel({
     mode: null,
     startTime: null,
     capturedTranscripts: []
+  })
+  
+  const [confirmationDialog, setConfirmationDialog] = useState<ConfirmationDialogState>({
+    isOpen: false,
+    transcripts: [],
+    mode: null
   })
 
   // 字幕更新の監視
@@ -77,17 +89,48 @@ export default function VoiceInputPanel({
     })
 
     if (transcriptData.trim()) {
-      // AI処理を実行
-      onAiEdit({
-        instruction: transcriptData,
-        transcriptData,
+      // 確認ダイアログを表示
+      setConfirmationDialog({
+        isOpen: true,
+        transcripts: recordingState.capturedTranscripts,
         mode
       })
     } else {
-      alert('録音された内容がありません')
+      alert('記録された内容がありません')
     }
 
     logger.debug(`Stopped ${mode} recording, captured ${transcriptData.length} characters`)
+  }
+
+  const handleConfirmEdit = () => {
+    if (!confirmationDialog.mode || confirmationDialog.transcripts.length === 0) return
+
+    const transcriptData = confirmationDialog.transcripts.join('\n')
+    
+    // AI処理を実行
+    onAiEdit({
+      instruction: transcriptData,
+      transcriptData,
+      mode: confirmationDialog.mode
+    })
+
+    // ダイアログを閉じる
+    setConfirmationDialog({
+      isOpen: false,
+      transcripts: [],
+      mode: null
+    })
+  }
+
+  const handleCancelEdit = () => {
+    // ダイアログを閉じて入力を破棄
+    setConfirmationDialog({
+      isOpen: false,
+      transcripts: [],
+      mode: null
+    })
+    
+    logger.debug('User cancelled voice input')
   }
 
   const getButtonStyle = (mode: 'edit' | 'research') => {
@@ -124,7 +167,7 @@ export default function VoiceInputPanel({
     <div className="bg-white rounded-lg shadow-sm h-full flex flex-col">
       <div className="p-4 border-b bg-purple-50">
         <h2 className="text-lg font-semibold text-purple-900 flex items-center gap-2">
-          音声入力
+          AIアシスタント
           {meeting && (
             <button
               onClick={onStopRecording}
@@ -150,7 +193,7 @@ export default function VoiceInputPanel({
                   ? '⏹ 停止して編集' 
                   : '✏️ 議事録編集'}
               </button>
-              <span className="text-xs text-gray-600">音声で編集指示</span>
+              <span className="text-xs text-gray-600">字幕で編集指示</span>
 
               <button
                 onClick={() => recordingState.isRecording ? stopRecording() : startRecording('research')}
@@ -170,7 +213,7 @@ export default function VoiceInputPanel({
                 <div className="flex items-center gap-2 text-sm">
                   <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
                   <span className="text-gray-700">
-                    {recordingState.mode === 'edit' ? '編集指示を録音中' : '質問を録音中'}
+                    {recordingState.mode === 'edit' ? '編集指示を記録中' : '質問を記録中'}
                   </span>
                   <span className="font-mono text-gray-600">
                     {getRecordingDuration()}
@@ -188,6 +231,53 @@ export default function VoiceInputPanel({
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
               <span className="text-sm text-gray-700">AI処理中...</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 確認ダイアログ */}
+      {confirmationDialog.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {confirmationDialog.mode === 'edit' ? '編集内容の確認' : 'リサーチ内容の確認'}
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                この内容で{confirmationDialog.mode === 'edit' ? '議事録を編集' : 'リサーチを実行'}しますか？
+              </p>
+            </div>
+            
+            <div className="flex-1 p-6 overflow-y-auto">
+              <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                {confirmationDialog.transcripts.length > 0 ? (
+                  confirmationDialog.transcripts.map((transcript, index) => (
+                    <div key={index} className="text-sm text-gray-700 leading-relaxed">
+                      {transcript}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm text-gray-500 italic">
+                    記録された内容がありません
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button
+                onClick={handleCancelEdit}
+                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleConfirmEdit}
+                className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                OK
+              </button>
             </div>
           </div>
         </div>
