@@ -6,6 +6,7 @@ import MeetingNextSteps from '@/components/MeetingNextSteps'
 import ResizablePanel from '@/components/ResizablePanel'
 import LiveModeLayout from '@/components/LiveModeLayout'
 import { logger } from '@/utils/logger'
+import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 
 function App() {
   const [currentMeeting, setCurrentMeeting] = useState<Meeting | null>(null)
@@ -20,10 +21,51 @@ function App() {
   const [showNextStepsPanel, setShowNextStepsPanel] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [activePanel, setActivePanel] = useState<'main' | 'nextsteps' | 'chat'>('main')
+  const [isRecording, setIsRecording] = useState(false)
 
   useEffect(() => {
     logger.debug('Initial useEffect - loading data')
     loadData()
+    
+    // 初回の状態同期リクエスト
+    ChromeErrorHandler.sendMessage({ type: 'REQUEST_STATE_SYNC' })
+      .then(response => {
+        if (response?.success && response.state) {
+          setIsRecording(response.state.isRecording)
+          setIsMinutesGenerating(response.state.isMinutesGenerating)
+        }
+      })
+      .catch(error => {
+        logger.error('Failed to sync state:', error)
+      })
+    
+    // 状態同期のリスナーを設定
+    const handleMessage = (message: any) => {
+      logger.debug('Viewer received message:', message.type)
+      
+      switch (message.type) {
+        case 'STATE_SYNC':
+          setIsRecording(message.payload.isRecording)
+          setIsMinutesGenerating(message.payload.isMinutesGenerating)
+          break
+        case 'MINUTES_GENERATION_STARTED':
+          setIsMinutesGenerating(true)
+          break
+        case 'MINUTES_GENERATED':
+          setIsMinutesGenerating(false)
+          loadData() // 議事録が生成されたらデータを再読み込み
+          break
+        case 'MINUTES_GENERATION_FAILED':
+          setIsMinutesGenerating(false)
+          break
+        case 'RECORDING_STOPPED':
+          setIsRecording(false)
+          loadData()
+          break
+      }
+    }
+    
+    chrome.runtime.onMessage.addListener(handleMessage)
     
     // モバイル判定
     const checkMobile = () => {
@@ -75,6 +117,7 @@ function App() {
       window.removeEventListener('resize', checkMobile)
       chrome.storage.onChanged.removeListener(handleStorageChange)
       document.removeEventListener('click', handleClickOutside)
+      chrome.runtime.onMessage.removeListener(handleMessage)
     }
   }, [])
 
@@ -119,35 +162,44 @@ function App() {
     
     setIsMinutesGenerating(true)
     
-    chrome.runtime.sendMessage({
+    ChromeErrorHandler.sendMessage({
       type: 'GENERATE_MINUTES'
-    }, (response) => {
-      if (response?.success) {
-        // 成功通知は不要（自動更新される）
-      } else {
-        alert('エラー: ' + (response?.error || '議事録の生成に失敗しました'))
-        setIsMinutesGenerating(false)
-      }
     })
+      .then(response => {
+        if (!response?.success) {
+          alert('エラー: ' + (response?.error || '議事録の生成に失敗しました'))
+          setIsMinutesGenerating(false)
+        }
+      })
+      .catch(error => {
+        logger.error('Failed to generate minutes:', error)
+        alert(ChromeErrorHandler.getUserFriendlyMessage(error))
+        setIsMinutesGenerating(false)
+      })
   }
 
   const stopRecording = () => {
     if (!currentMeeting?.id) return
     
     if (confirm('記録を停止しますか？')) {
-      chrome.runtime.sendMessage({
+      ChromeErrorHandler.sendMessage({
         type: 'STOP_RECORDING'
-      }, (response) => {
-        if (response?.success) {
-          // 停止成功後、currentMeetingをクリアしてUIを更新
-          setCurrentMeeting(null)
-          setIsMinutesGenerating(false)
-          // データの再読み込み
-          setTimeout(loadData, 500)
-        } else {
-          alert('エラー: ' + (response?.error || '記録の停止に失敗しました'))
-        }
       })
+        .then(response => {
+          if (response?.success) {
+            // 停止成功後、currentMeetingをクリアしてUIを更新
+            setCurrentMeeting(null)
+            setIsMinutesGenerating(false)
+            // データの再読み込み
+            setTimeout(loadData, 500)
+          } else {
+            alert('エラー: ' + (response?.error || '記録の停止に失敗しました'))
+          }
+        })
+        .catch(error => {
+          logger.error('Failed to stop recording:', error)
+          alert(ChromeErrorHandler.getUserFriendlyMessage(error))
+        })
     }
   }
 
@@ -385,7 +437,7 @@ function App() {
           </div>
         )}
 
-        {/* ライブモード */}
+        {/* ライブモード - 3パネル縦積みレイアウト */}
         {isLiveMode && (
           <LiveModeLayout
             meeting={currentMeeting}
