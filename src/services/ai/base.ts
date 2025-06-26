@@ -167,6 +167,7 @@ export abstract class BaseAIService {
       duration: durationText,
       transcripts: transcripts ? this.formatTranscriptsEnhanced(transcripts, meetingInfo?.startTime, meetingInfo?.endTime) : '',
       speakerMap: transcripts ? this.buildSpeakerMap(transcripts) : {},
+      currentTime: new Date().toLocaleString('ja-JP'),
     }
     
     // テンプレート変数を置換
@@ -201,7 +202,8 @@ export abstract class BaseAIService {
       participants: meeting.participants.join(', '),
       duration: durationText,
       transcripts: this.formatTranscriptsForNextSteps(meeting.transcripts),
-      speakerMap: this.buildSpeakerMap(meeting.transcripts)
+      speakerMap: this.buildSpeakerMap(meeting.transcripts),
+      currentTime: new Date().toLocaleString('ja-JP'),
     }
     
     // テンプレート変数を置換

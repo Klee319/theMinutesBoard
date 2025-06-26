@@ -128,19 +128,32 @@ class TranscriptCapture {
   }
   
   private updateRecordingUI(recording: boolean) {
+    logger.debug('Updating recording UI, recording:', recording)
+    
     const toggleBtn = document.getElementById('minutes-toggle-recording')
     const generateBtn = document.getElementById('minutes-generate')
     
     if (toggleBtn) {
+      const btnText = toggleBtn.querySelector('.btn-text')
       if (recording) {
         toggleBtn.classList.add('recording')
-        const btnText = toggleBtn.querySelector('.btn-text')
-        if (btnText) btnText.textContent = '記録停止'
+        if (btnText) {
+          btnText.textContent = '記録停止'
+          logger.debug('UI updated: button text changed to "記録停止"')
+        }
+        // ボタンが無効化されていないことを確認
+        toggleBtn.removeAttribute('disabled')
       } else {
         toggleBtn.classList.remove('recording')
-        const btnText = toggleBtn.querySelector('.btn-text')
-        if (btnText) btnText.textContent = '記録開始'
+        if (btnText) {
+          btnText.textContent = '記録開始'
+          logger.debug('UI updated: button text changed to "記録開始"')
+        }
+        // ボタンが無効化されていないことを確認
+        toggleBtn.removeAttribute('disabled')
       }
+    } else {
+      logger.warn('Toggle button not found in updateRecordingUI')
     }
     
     if (generateBtn) {
@@ -163,7 +176,7 @@ class TranscriptCapture {
         <button class="minimize-btn" title="最小化">_</button>
       </div>
       <div class="panel-content">
-        <button id="minutes-toggle-recording" class="control-btn">
+        <button id="minutes-toggle-recording" class="control-btn" style="pointer-events: auto;">
           <span class="record-icon"></span>
           <span class="btn-text">記録開始</span>
         </button>
@@ -232,10 +245,17 @@ class TranscriptCapture {
     const generateBtn = document.getElementById('minutes-generate')
     const openTabBtn = document.getElementById('minutes-open-tab')
     
-    toggleBtn?.addEventListener('click', () => {
+    toggleBtn?.addEventListener('click', (e) => {
+      e.preventDefault() // デフォルト動作を防ぐ
+      e.stopPropagation() // イベントの伝播を停止
+      
+      logger.debug('Toggle button clicked, isRecording:', this.isRecording)
+      
       if (this.isRecording) {
+        logger.debug('Calling stopRecording...')
         this.stopRecording()
       } else {
+        logger.debug('Calling startRecording...')
         this.startRecording()
       }
     })
@@ -456,6 +476,14 @@ class TranscriptCapture {
           sendResponse({ success: true })
           break
           
+        case 'CHECK_CAPTIONS':
+          // 字幕の状態をチェック
+          this.checkForCaptions()
+          const hasCaptions = !!this.captionsContainer
+          logger.info('Caption status check:', hasCaptions)
+          sendResponse({ success: true, hasCaptions })
+          break
+          
         default:
           sendResponse({ success: false, error: 'Unknown message type' })
       }
@@ -464,81 +492,111 @@ class TranscriptCapture {
   }
   
   private waitForCaptions() {
-    // 複数の可能なセレクタを試す
-    const captionSelectors = [
-      '[jsname="dsyhDe"]',
-      '[jsname="tgaKEf"]',
-      '.a4cQT',
-      '[role="region"][aria-live="polite"]',
-      '.TBMuR.bj4p3b',
-      '.iOzk7[jsname="tgaKEf"]'
-    ]
+    // 新しいセレクタリストを使用
+    let attemptCount = 0
+    const maxAttempts = 30 // 30秒まで待つ
     
     const checkInterval = setInterval(() => {
-      let captionsFound = false
+      attemptCount++
       
-      for (const selector of captionSelectors) {
-        const element = document.querySelector(selector)
-        if (element) {
-          // 字幕コンテナが実際に表示されているか確認
-          const isVisible = (element as HTMLElement).offsetParent !== null
-          if (isVisible) {
-            this.captionsContainer = element
-            captionsFound = true
-            logger.debug('Captions container found with selector:', selector)
-            break
-          }
-        }
-      }
-      
-      if (captionsFound) {
+      if (this.checkForCaptions()) {
         clearInterval(checkInterval)
         this.cleanupIntervals.delete(checkInterval)
+        logger.info('Captions container found after waiting')
+      } else if (attemptCount >= maxAttempts) {
+        clearInterval(checkInterval)
+        this.cleanupIntervals.delete(checkInterval)
+        logger.warn('Captions container not found after maximum attempts')
+      } else if (attemptCount % 5 === 0) {
+        logger.debug(`Still waiting for captions... (attempt ${attemptCount}/${maxAttempts})`)
       }
     }, 1000)
+    
     this.cleanupIntervals.add(checkInterval)
   }
   
   private checkForCaptions() {
     const captionSelectors = [
+      // 2024年の新しいセレクタ
+      '[jsname="YSg9Nc"]',
+      '[jscontroller="GCpkte"]',
+      '[data-use-drivesdk-live-captions]',
+      // 既存のセレクタ
       '[jsname="dsyhDe"]',
       '[jsname="tgaKEf"]',
       '.a4cQT',
       '[role="region"][aria-live="polite"]',
       '.TBMuR.bj4p3b',
-      '.iOzk7[jsname="tgaKEf"]'
+      '.iOzk7[jsname="tgaKEf"]',
+      // 追加の一般的なセレクタ
+      '[aria-live="polite"][role="region"]',
+      '.a4cQT[jsname="YPqjbf"]',
+      '[jsname="YPqjbf"]',
+      '[data-is-speakable="true"]'
     ]
+    
+    logger.debug('Checking for captions with selectors:', captionSelectors)
     
     for (const selector of captionSelectors) {
       const element = document.querySelector(selector)
-      if (element && (element as HTMLElement).offsetParent !== null) {
-        // 実際に字幕が表示されているかを確認
-        const hasVisibleContent = element.textContent && element.textContent.trim().length > 0
-        const isVisible = element.offsetWidth > 0 && element.offsetHeight > 0
+      if (element) {
+        const htmlElement = element as HTMLElement
+        const isHidden = htmlElement.offsetParent === null
+        const hasContent = element.textContent && element.textContent.trim().length > 0
+        const hasSize = htmlElement.offsetWidth > 0 && htmlElement.offsetHeight > 0
+        const computedStyle = window.getComputedStyle(htmlElement)
+        const isDisplayNone = computedStyle.display === 'none'
+        const isVisibilityHidden = computedStyle.visibility === 'hidden'
         
-        if (isVisible) {
+        logger.debug(`Selector ${selector}:`, {
+          found: true,
+          isHidden,
+          hasContent,
+          hasSize,
+          isDisplayNone,
+          isVisibilityHidden,
+          textContent: element.textContent?.substring(0, 50)
+        })
+        
+        // より緩い条件で字幕コンテナを判定
+        if (!isDisplayNone && !isVisibilityHidden) {
           this.captionsContainer = element
-          logger.debug('Captions container found with selector:', selector)
-          logger.debug('Caption element visible:', isVisible, 'has content:', hasVisibleContent)
+          logger.info('Captions container found with selector:', selector)
           return true
         }
       }
     }
+    
+    logger.warn('No captions container found after checking all selectors')
     return false
   }
   
-  private startRecording() {
+  private async startRecording() {
     if (this.isRecording) {
       logger.debug('Already recording')
       return
     }
     
-    // 字幕コンテナを再度チェック
-    this.checkForCaptions()
+    // 字幕コンテナを再度チェック（複数回試行）
+    let captionsFound = false
+    for (let i = 0; i < 3; i++) {
+      if (this.checkForCaptions()) {
+        captionsFound = true
+        break
+      }
+      if (i < 2) {
+        // 待機してから再試行（最後の試行では待機しない）
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        logger.debug(`Caption check attempt ${i + 1} failed, retrying...`)
+      }
+    }
     
-    if (!this.captionsContainer) {
-      logger.warn('No captions container found')
-      this.showNotification('字幕が有効になっていません。字幕をONにしてください。', 'error')
+    if (!captionsFound || !this.captionsContainer) {
+      logger.warn('No captions container found after multiple attempts')
+      
+      // 字幕なしでは記録を開始できないことを通知
+      this.showNotification('字幕を有効にしてから、もう一度記録開始ボタンをクリックしてください。', 'error')
+      this.highlightCaptionButton()
       return
     }
     
@@ -577,53 +635,90 @@ class TranscriptCapture {
       openTabBtn.style.display = 'flex'
     }
     
-    this.observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.type === 'childList') {
-          this.processCaptions()
+    // 字幕コンテナがある場合のみオブザーバーを設定
+    if (this.captionsContainer) {
+      this.observer = new MutationObserver((mutations) => {
+        // 記録中でない場合は処理をスキップ
+        if (!this.isRecording) {
+          logger.debug('MutationObserver fired but not recording, skipping')
+          return
         }
+        
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'childList') {
+            this.processCaptions()
+          }
+        })
       })
-    })
-    
-    this.observer.observe(this.captionsContainer, {
-      childList: true,
-      subtree: true
-    })
+      
+      this.observer.observe(this.captionsContainer, {
+        childList: true,
+        subtree: true
+      })
+      
+      logger.info('MutationObserver set up for captions')
+    } else {
+      logger.warn('No captions container, MutationObserver not set up')
+      // 定期的に字幕コンテナをチェック
+      this.startCaptionPolling()
+    }
     
     logger.info('Recording started')
     this.showNotification('記録を開始しました')
   }
   
   private stopRecording() {
-    if (!this.isRecording) return
+    if (!this.isRecording) {
+      logger.warn('stopRecording called but not recording')
+      return
+    }
     
+    logger.info('Stopping recording...')
+    
+    // 即座に記録フラグをfalseに設定（重複実行を防ぐ）
     this.isRecording = false
-    ChromeErrorHandler.sendMessage({ type: 'STOP_RECORDING' })
-      .then(() => {
-        logger.debug('Recording stopped successfully')
-      })
-      .catch(error => {
-        logger.error('Error stopping recording:', error)
-        this.showNotification(
-          ChromeErrorHandler.getUserFriendlyMessage(error), 
-          'error'
-        )
-      })
     
+    // UIを即座に更新
     this.updateRecordingUI(false)
     
+    // オブザーバーを即座に停止
     if (this.observer) {
       this.observer.disconnect()
       this.observer = null
+      logger.debug('MutationObserver disconnected')
     }
     
-    // 別タブで開くボタンは表示したまま（停止後も押せるように）
-    // const openTabBtn = document.getElementById('minutes-open-tab')
-    // if (openTabBtn) {
-    //   openTabBtn.style.display = 'flex'  // 非表示にしない
-    // }
+    // キャプションコンテナの参照をクリア
+    this.captionsContainer = null
     
-    logger.info('Recording stopped')
+    // 通知を即座に表示
+    this.showNotification('記録を停止しました', 'info')
+    
+    // バックグラウンドへの通知（非同期、失敗しても継続）
+    ChromeErrorHandler.checkContextValidity()
+      .then(isValid => {
+        if (isValid) {
+          return ChromeErrorHandler.sendMessage({ type: 'STOP_RECORDING' })
+        } else {
+          logger.warn('Extension context invalidated, skipping stop recording message')
+          return Promise.resolve({ success: true })
+        }
+      })
+      .then((response) => {
+        if (response?.success) {
+          logger.debug('Background notified of recording stop')
+        }
+      })
+      .catch(error => {
+        // エラーがあっても記録は既に停止しているため、ログのみ
+        if (ChromeErrorHandler.isExtensionContextError(error)) {
+          logger.warn('Extension context invalidated during stop recording:', error)
+        } else {
+          logger.error('Error notifying background of stop:', error)
+        }
+      })
+    
+    logger.info('Recording stopped successfully')
   }
 
   private setupCallStatusMonitoring() {
@@ -643,8 +738,24 @@ class TranscriptCapture {
       }
     }
     
-    // URLの変更を定期的にチェック
-    const urlCheckInterval = setInterval(checkUrl, 1000)
+    // URLの変更を定期的にチェック（デバウンス処理付き）
+    let lastUrl = currentUrl
+    let urlChangeTimer: NodeJS.Timeout | null = null
+    
+    const debouncedCheckUrl = () => {
+      const newUrl = window.location.href
+      if (newUrl !== lastUrl) {
+        if (urlChangeTimer) {
+          clearTimeout(urlChangeTimer)
+        }
+        urlChangeTimer = setTimeout(() => {
+          checkUrl()
+          lastUrl = newUrl
+        }, 500) // 500ms待機してから実行
+      }
+    }
+    
+    const urlCheckInterval = setInterval(debouncedCheckUrl, 2000) // 2秒ごとにチェック
     this.cleanupIntervals.add(urlCheckInterval)
     
     // popstateイベントでも監視（ブラウザの戻る/進むボタン）
@@ -655,8 +766,18 @@ class TranscriptCapture {
     
     // ページ離脱時のイベント監視
     window.addEventListener('beforeunload', () => {
-      this.handleCallEnded('Page unload')
+      // ページ離脱前にクリーンアップを実行
+      if (this.isRecording) {
+        this.isRecording = false
+        this.updateRecordingUI(false)
+        if (this.observer) {
+          this.observer.disconnect()
+          this.observer = null
+        }
+      }
       clearInterval(urlCheckInterval)
+      // ページ離脱時はメッセージ送信をスキップ（コンテキストが無効になるため）
+      logger.info('Page unloading, skipping call ended message')
     })
     
     // 通話終了ボタンの監視
@@ -923,29 +1044,41 @@ class TranscriptCapture {
         
         // 記録中の場合、参加者の変更を記録
         if (this.isRecording) {
-          newParticipants.forEach(participant => {
-            ChromeErrorHandler.sendMessage({
-              type: 'PARTICIPANT_UPDATE',
-              payload: {
-                action: 'joined',
-                participant: participant,
-                timestamp: new Date().toISOString()
-              }
-            }).catch(error => {
-              logger.error('Failed to send participant update:', error)
+          // コンテキストが有効な場合のみ送信
+          ChromeErrorHandler.checkContextValidity().then(isValid => {
+            if (!isValid) {
+              logger.warn('Extension context invalidated, skipping participant updates')
+              return
+            }
+            
+            newParticipants.forEach(participant => {
+              ChromeErrorHandler.sendMessage({
+                type: 'PARTICIPANT_UPDATE',
+                payload: {
+                  action: 'joined',
+                  participant: participant,
+                  timestamp: new Date().toISOString()
+                }
+              }).catch(error => {
+                if (!ChromeErrorHandler.isExtensionContextError(error)) {
+                  logger.error('Failed to send participant update:', error)
+                }
+              })
             })
-          })
-          
-          leftParticipants.forEach(participant => {
-            ChromeErrorHandler.sendMessage({
-              type: 'PARTICIPANT_UPDATE',
-              payload: {
-                action: 'left',
-                participant: participant,
-                timestamp: new Date().toISOString()
-              }
-            }).catch(error => {
-              logger.error('Failed to send participant update:', error)
+            
+            leftParticipants.forEach(participant => {
+              ChromeErrorHandler.sendMessage({
+                type: 'PARTICIPANT_UPDATE',
+                payload: {
+                  action: 'left',
+                  participant: participant,
+                  timestamp: new Date().toISOString()
+                }
+              }).catch(error => {
+                if (!ChromeErrorHandler.isExtensionContextError(error)) {
+                  logger.error('Failed to send participant update:', error)
+                }
+              })
             })
           })
         }
@@ -981,15 +1114,27 @@ class TranscriptCapture {
     if (this.isRecording) {
       logger.info('Auto-stopping recording due to call end')
       this.stopRecording()
-      this.showNotification('通話が終了したため、記録を自動停止しました', 'info')
       
-      // バックグラウンドにも通知
-      ChromeErrorHandler.sendMessage({ 
-        type: 'CALL_ENDED',
-        reason: reason,
-        timestamp: new Date().toISOString()
+      // ページ離脱以外の理由の場合のみ通知を表示
+      if (reason !== 'Page unload') {
+        this.showNotification('通話が終了したため、記録を自動停止しました', 'info')
+      }
+      
+      // バックグラウンドにも通知（コンテキストが有効な場合のみ）
+      ChromeErrorHandler.checkContextValidity().then(isValid => {
+        if (isValid) {
+          return ChromeErrorHandler.sendMessage({ 
+            type: 'CALL_ENDED',
+            reason: reason,
+            timestamp: new Date().toISOString()
+          })
+        } else {
+          logger.warn('Extension context invalidated, skipping call ended message')
+        }
       }).catch(error => {
-        logger.error('Failed to send call ended message:', error)
+        if (!ChromeErrorHandler.isExtensionContextError(error)) {
+          logger.error('Failed to send call ended message:', error)
+        }
       })
     }
     
@@ -1007,7 +1152,16 @@ class TranscriptCapture {
   }
   
   private processCaptions() {
-    if (!this.captionsContainer) return
+    // 記録中でない場合は即座にリターン
+    if (!this.isRecording) {
+      logger.debug('processCaptions called but not recording, skipping')
+      return
+    }
+    
+    if (!this.captionsContainer) {
+      logger.debug('processCaptions called but no captionsContainer')
+      return
+    }
     
     // より詳細なデバッグログ
     logger.debug('Processing captions from container:', this.captionsContainer)
@@ -1474,15 +1628,118 @@ class TranscriptCapture {
   private showNotification(message: string, type: 'success' | 'error' | 'info' = 'success') {
     const notification = document.createElement('div')
     notification.className = `minutes-notification ${type}`
-    notification.textContent = message
+    notification.innerHTML = message.replace(/\n/g, '<br>')
     document.body.appendChild(notification)
     
     const fadeTimeout = setTimeout(() => {
       notification.classList.add('fade-out')
       const removeTimeout = setTimeout(() => notification.remove(), 300)
       this.cleanupTimeouts.add(removeTimeout)
-    }, 3000)
+    }, type === 'error' ? 5000 : 3000) // エラーメッセージは長めに表示
     this.cleanupTimeouts.add(fadeTimeout)
+  }
+  
+  private startCaptionPolling() {
+    // 記録中に定期的に字幕コンテナをチェック
+    const pollingInterval = setInterval(() => {
+      if (!this.isRecording) {
+        clearInterval(pollingInterval)
+        this.cleanupIntervals.delete(pollingInterval)
+        return
+      }
+      
+      if (this.checkForCaptions() && this.captionsContainer) {
+        logger.info('Captions container found during polling')
+        clearInterval(pollingInterval)
+        this.cleanupIntervals.delete(pollingInterval)
+        
+        // オブザーバーを設定
+        if (!this.observer) {
+          this.observer = new MutationObserver((mutations) => {
+            if (!this.isRecording) return
+            
+            mutations.forEach((mutation) => {
+              if (mutation.type === 'childList') {
+                this.processCaptions()
+              }
+            })
+          })
+          
+          this.observer.observe(this.captionsContainer, {
+            childList: true,
+            subtree: true
+          })
+          
+          logger.info('MutationObserver set up after polling')
+          this.showNotification('字幕が有効になりました', 'info')
+        }
+      }
+    }, 2000) // 2秒ごとにチェック
+    
+    this.cleanupIntervals.add(pollingInterval)
+  }
+  
+  private highlightCaptionButton() {
+    // 字幕ボタンのセレクタ
+    const captionButtonSelectors = [
+      '[aria-label*="字幕"]',
+      '[aria-label*="キャプション"]',
+      '[aria-label*="Captions"]',
+      '[aria-label*="Turn on captions"]',
+      '[aria-label*="Turn off captions"]',
+      '[jsname="r8qRAd"]',
+      '[data-tooltip*="字幕"]',
+      '[data-tooltip*="caption"]',
+      'button[data-is-muted="false"][aria-label*="CC"]',
+      'button[aria-label*="CC"]',
+      // 新しいセレクタ
+      '[data-tooltip-id*="caption"]',
+      '[data-promo-anchor-id*="caption"]',
+      'button[data-mdc-dialog-action="TURN_ON_CAPTIONS"]'
+    ]
+    
+    logger.debug('Looking for caption button...')
+    
+    for (const selector of captionButtonSelectors) {
+      const button = document.querySelector(selector)
+      if (button) {
+        const htmlButton = button as HTMLElement
+        
+        // 既存のスタイルを保存
+        const originalStyle = {
+          animation: htmlButton.style.animation,
+          border: htmlButton.style.border,
+          boxShadow: htmlButton.style.boxShadow
+        }
+        
+        // ハイライト効果を追加
+        htmlButton.style.animation = 'pulse 2s infinite'
+        htmlButton.style.border = '3px solid #ff0000'
+        htmlButton.style.boxShadow = '0 0 10px #ff0000'
+        
+        // スタイルを追加
+        const style = document.createElement('style')
+        style.textContent = `
+          @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+          }
+        `
+        document.head.appendChild(style)
+        
+        // 5秒後にハイライトを削除
+        setTimeout(() => {
+          htmlButton.style.animation = originalStyle.animation
+          htmlButton.style.border = originalStyle.border
+          htmlButton.style.boxShadow = originalStyle.boxShadow
+          style.remove()
+        }, 5000)
+        
+        logger.info('Caption button highlighted:', selector)
+        break
+      }
+    }
   }
 
   private setupTabSwitching() {
@@ -1625,6 +1882,12 @@ class TranscriptCapture {
   // クリーンアップメソッド
   private cleanup() {
     logger.debug('Cleaning up TranscriptCapture')
+    
+    // 記録中の場合は停止
+    if (this.isRecording) {
+      logger.info('Stopping recording due to page unload')
+      this.stopRecording()
+    }
     
     // 最後のバッファをフラッシュ
     if (this.transcriptBuffer.length > 0) {

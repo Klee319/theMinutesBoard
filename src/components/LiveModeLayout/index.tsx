@@ -4,6 +4,7 @@ import ResizablePanel from '@/components/ResizablePanel'
 import LiveMinutesPanel from '@/components/LiveMinutesPanel'
 import LiveNextStepsPanel from '@/components/LiveNextStepsPanel'
 import ResearchPanel from '@/components/ResearchPanel'
+import { NextStepsEditModal } from '@/components/NextStepsEditModal'
 import { logger } from '@/utils/logger'
 
 interface LiveModeLayoutProps {
@@ -12,6 +13,8 @@ interface LiveModeLayoutProps {
   onGenerateMinutes: () => void
   onStopRecording: () => void
   isRecording?: boolean
+  showNextStepsPanel?: boolean
+  showResearchPanel?: boolean
 }
 
 // モバイル用タブコンポーネント
@@ -54,6 +57,13 @@ function MobilePanelTabs({
       setActiveTab('minutes')
     }
   }, [showResearchPanel, activeTab])
+  
+  // ネクストステップパネルが非表示になった場合のタブ切り替え
+  React.useEffect(() => {
+    if (!showNextStepsPanel && activeTab === 'nextsteps') {
+      setActiveTab('minutes')
+    }
+  }, [showNextStepsPanel, activeTab])
 
   return (
     <div className="h-full flex flex-col">
@@ -102,8 +112,8 @@ function MobilePanelTabs({
               isGenerating={isMinutesGenerating || (isUpdating && updateSource === 'manual')}
               isLocked={isUpdating}
               onManualUpdate={onManualUpdate}
+              isRecording={isRecording}
               showResearchPanel={showResearchPanel}
-              onToggleResearchPanel={onToggleResearchPanel}
             />
           </div>
         )}
@@ -135,11 +145,41 @@ export default function LiveModeLayout({
   isMinutesGenerating,
   onGenerateMinutes,
   onStopRecording,
-  isRecording = false
+  isRecording = false,
+  showNextStepsPanel: showNextStepsPanelProp = true,
+  showResearchPanel: showResearchPanelProp = true
 }: LiveModeLayoutProps) {
   // 更新処理の排他制御
   const [isUpdating, setIsUpdating] = useState(false)
   const [updateSource, setUpdateSource] = useState<'manual' | null>(null)
+  
+  // AIアシスタントのレスポンス管理
+  const [aiResponses, setAiResponses] = useState<Array<{
+    id: string
+    response: string
+    duration: number
+  }>>([])
+  
+  // AIアシスタントのレスポンスを受信
+  useEffect(() => {
+    const handleAIResponse = (message: any) => {
+      if (message.type === 'AI_ASSISTANT_RESPONSE' && message.payload.meetingId === meeting?.id) {
+        const newResponse = {
+          id: Date.now().toString(),
+          response: message.payload.response,
+          duration: message.payload.duration
+        }
+        setAiResponses(prev => [...prev, newResponse])
+      }
+    }
+    
+    chrome.runtime.onMessage.addListener(handleAIResponse)
+    return () => chrome.runtime.onMessage.removeListener(handleAIResponse)
+  }, [meeting?.id])
+  
+  const handleCloseAIResponse = (id: string) => {
+    setAiResponses(prev => prev.filter(r => r.id !== id))
+  }
 
   // 更新処理の排他制御関数
   const handleUpdate = async () => {
@@ -183,7 +223,30 @@ export default function LiveModeLayout({
   const [leftPanelWidth, setLeftPanelWidth] = useState(40) // 40%
   const [middlePanelWidth, setMiddlePanelWidth] = useState(40) // 40%
   const [rightPanelWidth, setRightPanelWidth] = useState(20) // 20%
-  const [showResearchPanel, setShowResearchPanel] = useState(true) // リサーチパネルの表示/非表示
+  const showResearchPanel = showResearchPanelProp
+  const showNextStepsPanel = showNextStepsPanelProp
+  
+  // パネルの表示状態が変更された時に幅を再計算
+  useEffect(() => {
+    if (!showNextStepsPanel && !showResearchPanel) {
+      // 議事録のみ表示
+      setLeftPanelWidth(100)
+    } else if (!showNextStepsPanel && showResearchPanel) {
+      // 議事録とリサーチの2パネル
+      setLeftPanelWidth(70)
+      setRightPanelWidth(30)
+    } else if (showNextStepsPanel && !showResearchPanel) {
+      // 議事録とネクストステップの2パネル
+      setLeftPanelWidth(50)
+      setMiddlePanelWidth(50)
+    } else {
+      // 3パネルすべて表示
+      // デフォルトの3パネル配分に設定
+      setLeftPanelWidth(40)
+      setMiddlePanelWidth(40)
+      setRightPanelWidth(20)
+    }
+  }, [showNextStepsPanel, showResearchPanel])
 
   return (
     <div className="h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
@@ -197,7 +260,7 @@ export default function LiveModeLayout({
             updateSource={updateSource}
             onManualUpdate={handleUpdate}
             showResearchPanel={showResearchPanel}
-            onToggleResearchPanel={setShowResearchPanel}
+            showNextStepsPanel={showNextStepsPanel}
           />
         </div>
       ) : (
@@ -207,9 +270,17 @@ export default function LiveModeLayout({
           <div 
             className="bg-white rounded-lg shadow-sm overflow-hidden"
             style={{ 
-              width: showResearchPanel 
-                ? `${leftPanelWidth}%` 
-                : `${(leftPanelWidth / (leftPanelWidth + middlePanelWidth)) * 100}%`
+              width: (() => {
+                if (!showNextStepsPanel && !showResearchPanel) {
+                  return '100%';
+                } else if (!showNextStepsPanel && showResearchPanel) {
+                  return `${(leftPanelWidth / (leftPanelWidth + rightPanelWidth)) * 100}%`;
+                } else if (showNextStepsPanel && !showResearchPanel) {
+                  return `${(leftPanelWidth / (leftPanelWidth + middlePanelWidth)) * 100}%`;
+                } else {
+                  return `${leftPanelWidth}%`;
+                }
+              })()
             }}
           >
             <LiveMinutesPanel 
@@ -217,13 +288,14 @@ export default function LiveModeLayout({
               isGenerating={isMinutesGenerating || (isUpdating && updateSource === 'manual')}
               isLocked={isUpdating}
               onManualUpdate={handleUpdate}
+              isRecording={isRecording}
               showResearchPanel={showResearchPanel}
-              onToggleResearchPanel={setShowResearchPanel}
             />
           </div>
           
-          {/* リサイザー1: 議事録とネクストステップの間 */}
-          <div 
+          {/* リサイザー1: 議事録とネクストステップの間（ネクストステップ表示時のみ） */}
+          {showNextStepsPanel && (
+            <div 
               className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors"
               onMouseDown={(e) => {
                 e.preventDefault()
@@ -235,20 +307,47 @@ export default function LiveModeLayout({
                   const deltaX = ((e.clientX - startX) / window.innerWidth) * 100
                   
                   if (showResearchPanel) {
-                    // リサーチパネルが表示されている場合：左右の幅を調整、リサーチパネルの幅は固定
-                    const totalLeftMiddle = leftPanelWidth + middlePanelWidth
-                    const newLeftWidth = Math.max(15, Math.min(totalLeftMiddle - 15, startLeftWidth + deltaX))
-                    const newMiddleWidth = totalLeftMiddle - newLeftWidth
-                    
-                    setLeftPanelWidth(newLeftWidth)
-                    setMiddlePanelWidth(newMiddleWidth)
+                    // 3つのパネルが表示されている場合：最小20%
+                    if (deltaX > 0) {
+                      // 右に動かす：ネクストステップを小さくする
+                      const newMiddleWidth = Math.max(20, startMiddleWidth - deltaX)
+                      const newLeftWidth = Math.min(60, startLeftWidth + deltaX)
+                      
+                      // 合計が80%（リサーチパネル分を除く）を超えないように調整
+                      const totalLeftMiddle = 100 - rightPanelWidth
+                      if (newLeftWidth + newMiddleWidth <= totalLeftMiddle) {
+                        setLeftPanelWidth(newLeftWidth)
+                        setMiddlePanelWidth(newMiddleWidth)
+                      }
+                    } else {
+                      // 左に動かす：議事録を小さくする
+                      const newLeftWidth = Math.max(20, startLeftWidth + deltaX)
+                      const newMiddleWidth = Math.min(60, startMiddleWidth - deltaX)
+                      
+                      // 合計が80%（リサーチパネル分を除く）を超えないように調整
+                      const totalLeftMiddle = 100 - rightPanelWidth
+                      if (newLeftWidth + newMiddleWidth <= totalLeftMiddle) {
+                        setLeftPanelWidth(newLeftWidth)
+                        setMiddlePanelWidth(newMiddleWidth)
+                      }
+                    }
                   } else {
-                    // リサーチパネルが非表示の場合：左右で100%を分割
-                    const newLeftWidth = Math.max(20, Math.min(80, startLeftWidth + deltaX))
-                    const newMiddleWidth = 100 - newLeftWidth
-                    
-                    setLeftPanelWidth(newLeftWidth)
-                    setMiddlePanelWidth(newMiddleWidth)
+                    // 2つのパネルが表示されている場合：最小30%、最大70%
+                    if (deltaX > 0) {
+                      // 右に動かす：議事録を大きく、ネクストステップを小さく
+                      const newLeftWidth = Math.min(70, startLeftWidth + deltaX)
+                      const newMiddleWidth = Math.max(30, 100 - newLeftWidth)
+                      
+                      setLeftPanelWidth(newLeftWidth)
+                      setMiddlePanelWidth(newMiddleWidth)
+                    } else {
+                      // 左に動かす：議事録を小さく、ネクストステップを大きく
+                      const newLeftWidth = Math.max(30, startLeftWidth + deltaX)
+                      const newMiddleWidth = Math.min(70, 100 - newLeftWidth)
+                      
+                      setLeftPanelWidth(newLeftWidth)
+                      setMiddlePanelWidth(newMiddleWidth)
+                    }
                   }
                 }
                 
@@ -261,14 +360,21 @@ export default function LiveModeLayout({
                 document.addEventListener('mouseup', handleMouseUp)
               }}
             />
+          )}
           
-          {/* 中央: ネクストステップパネル */}
-          <div 
+          {/* 中央: ネクストステップパネル（表示時のみ） */}
+          {showNextStepsPanel && (
+            <div 
               className="bg-white rounded-lg shadow-sm overflow-hidden"
               style={{
-                width: showResearchPanel 
-                  ? `${middlePanelWidth}%` 
-                  : `${(middlePanelWidth / (leftPanelWidth + middlePanelWidth)) * 100}%`
+                width: (() => {
+                  if (!showResearchPanel) {
+                    // リサーチパネルが非表示の場合、残りの幅を使用
+                    return `${middlePanelWidth}%`;
+                  } else {
+                    return `${middlePanelWidth}%`;
+                  }
+                })()
               }}
             >
               <LiveNextStepsPanel 
@@ -276,34 +382,46 @@ export default function LiveModeLayout({
                 isLocked={isUpdating}
               />
             </div>
+          )}
           
-          {/* リサイザー2: ネクストステップとリサーチの間（リサーチパネル表示時のみ） */}
-          {showResearchPanel && (
+          {/* リサイザー2: ネクストステップとリサーチの間（両方表示時のみ） */}
+          {showNextStepsPanel && showResearchPanel && (
               <div 
                 className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors"
                 onMouseDown={(e) => {
                   e.preventDefault()
                   const startX = e.clientX
                   const startRightWidth = rightPanelWidth
+                  const startMiddleWidth = middlePanelWidth
+                  const startLeftWidth = leftPanelWidth
                   
                   const handleMouseMove = (e: MouseEvent) => {
                     const deltaX = ((e.clientX - startX) / window.innerWidth) * 100
-                    const newRightWidth = Math.max(15, Math.min(50, startRightWidth - deltaX))
-                    const deltaWidth = newRightWidth - rightPanelWidth
                     
-                    // リサーチパネルの幅変更分を議事録とネクストステップで等分
-                    const leftAdjustment = deltaWidth / 2
-                    const middleAdjustment = deltaWidth / 2
-                    
-                    const newLeftWidth = Math.max(15, leftPanelWidth - leftAdjustment)
-                    const newMiddleWidth = Math.max(15, middlePanelWidth - middleAdjustment)
-                    
-                    // 合計が100%になるよう調整
-                    const total = newLeftWidth + newMiddleWidth + newRightWidth
-                    if (total <= 100) {
-                      setLeftPanelWidth(newLeftWidth)
-                      setMiddlePanelWidth(newMiddleWidth)
-                      setRightPanelWidth(newRightWidth)
+                    if (deltaX > 0) {
+                      // 右に動かす：リサーチパネルを小さくする
+                      const newRightWidth = Math.max(20, startRightWidth - deltaX)
+                      const newMiddleWidth = Math.min(60, startMiddleWidth + deltaX)
+                      
+                      // 合計が100%になるように調整
+                      const newLeftWidth = 100 - newMiddleWidth - newRightWidth
+                      if (newLeftWidth >= 20) {
+                        setLeftPanelWidth(newLeftWidth)
+                        setMiddlePanelWidth(newMiddleWidth)
+                        setRightPanelWidth(newRightWidth)
+                      }
+                    } else {
+                      // 左に動かす：ネクストステップを小さくする
+                      const newMiddleWidth = Math.max(20, startMiddleWidth + deltaX)
+                      const newRightWidth = Math.min(60, startRightWidth - deltaX)
+                      
+                      // 合計が100%になるように調整
+                      const newLeftWidth = 100 - newMiddleWidth - newRightWidth
+                      if (newLeftWidth >= 20) {
+                        setLeftPanelWidth(newLeftWidth)
+                        setMiddlePanelWidth(newMiddleWidth)
+                        setRightPanelWidth(newRightWidth)
+                      }
                     }
                   }
                   
@@ -318,11 +436,53 @@ export default function LiveModeLayout({
               />
           )}
           
+          {/* リサイザー3: 議事録とリサーチの間（ネクストステップ非表示時のみ） */}
+          {!showNextStepsPanel && showResearchPanel && (
+            <div 
+              className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                const startX = e.clientX
+                const startLeftWidth = leftPanelWidth
+                const startRightWidth = rightPanelWidth
+                
+                const handleMouseMove = (e: MouseEvent) => {
+                  const deltaX = ((e.clientX - startX) / window.innerWidth) * 100
+                  
+                  // 2つのパネルが表示されている場合：最小30%
+                  const newLeftWidth = Math.max(30, Math.min(70, startLeftWidth + deltaX))
+                  const newRightWidth = 100 - newLeftWidth
+                  
+                  setLeftPanelWidth(newLeftWidth)
+                  setRightPanelWidth(newRightWidth)
+                }
+                
+                const handleMouseUp = () => {
+                  document.removeEventListener('mousemove', handleMouseMove)
+                  document.removeEventListener('mouseup', handleMouseUp)
+                }
+                
+                document.addEventListener('mousemove', handleMouseMove)
+                document.addEventListener('mouseup', handleMouseUp)
+              }}
+            />
+          )}
+          
           {/* 右側: リサーチパネル（表示時のみ） */}
           {showResearchPanel && (
               <div 
                 className="bg-white rounded-lg shadow-sm overflow-hidden"
-                style={{ width: `${rightPanelWidth}%` }}
+                style={{ 
+                  width: (() => {
+                    if (!showNextStepsPanel) {
+                      // ネクストステップパネルが非表示の場合
+                      return `${(rightPanelWidth / (leftPanelWidth + rightPanelWidth)) * 100}%`;
+                    } else {
+                      // 3つすべて表示されている場合
+                      return `${rightPanelWidth}%`;
+                    }
+                  })()
+                }}
               >
                 <ResearchPanel 
                   meeting={meeting}
@@ -332,6 +492,17 @@ export default function LiveModeLayout({
           )}
         </div>
       )}
+      
+      {/* ネクストステップ編集モーダル表示 */}
+      {aiResponses.map((resp) => (
+        <NextStepsEditModal
+          key={resp.id}
+          meetingId={meeting?.id || ''}
+          response={resp.response}
+          duration={resp.duration}
+          onClose={() => handleCloseAIResponse(resp.id)}
+        />
+      ))}
     </div>
   )
 }

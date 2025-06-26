@@ -221,7 +221,10 @@ export const NextStepsPanel: React.FC<NextStepsPanelProps> = ({
                 )}
                 {nextStep.dueDate && (
                   <span className="due-date">
-                    📅 {new Date(nextStep.dueDate).toLocaleDateString('ja-JP')}
+                    📅 {(() => {
+                      const date = new Date(nextStep.dueDate);
+                      return isNaN(date.getTime()) ? '期限未設定' : date.toLocaleDateString('ja-JP');
+                    })()}
                   </span>
                 )}
                 {nextStep.notes && (

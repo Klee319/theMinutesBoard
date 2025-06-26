@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Meeting, StorageData, Minutes } from '@/types'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
+import { ClearStorageButton } from './ClearStorageButton'
 
 function App() {
   const [isRecording, setIsRecording] = useState(false)
@@ -130,6 +131,25 @@ function App() {
     }
     
     if (!tab.id) return
+    
+    // 記録を開始する前に字幕の状態をチェック
+    if (!isRecording) {
+      try {
+        const captionStatus = await ChromeErrorHandler.sendMessageToTab(tab.id, { type: 'CHECK_CAPTIONS' })
+        if (!captionStatus?.hasCaptions) {
+          alert(
+            '⚠️ 字幕が有効になっていません\n\n' +
+            '記録を開始するには字幕を有効にする必要があります。\n\n' +
+            '字幕を有効にする方法：\n' +
+            '1. Google Meetの画面下部にある「CC」ボタンをクリック\n' +
+            '2. 「字幕をオンにする」を選択'
+          )
+          return
+        }
+      } catch (error) {
+        // エラーの場合は静かに続行（字幕チェックが失敗しても記録は可能）
+      }
+    }
     
     const messageType = isRecording ? 'STOP_RECORDING' : 'START_RECORDING'
     ChromeErrorHandler.sendMessageToTab(tab.id, { type: messageType })
@@ -273,7 +293,7 @@ function App() {
         </div>
       )}
       
-      <div className="border-t pt-3">
+      <div className="border-t pt-3 space-y-3">
         <button
           onClick={() => {
             const url = chrome.runtime.getURL('src/viewer/viewer.html?mode=history')
@@ -284,6 +304,8 @@ function App() {
           <span>📋</span>
           <span>履歴・ToDo確認</span>
         </button>
+        
+        <ClearStorageButton />
       </div>
     </div>
   )

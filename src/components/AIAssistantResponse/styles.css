@@ -1,0 +1,131 @@
+.ai-assistant-response {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 400px;
+  max-width: 90vw;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  transition: all 0.3s ease;
+  z-index: 1000;
+}
+
+.ai-assistant-response.hidden {
+  opacity: 0;
+  transform: translateY(20px);
+  pointer-events: none;
+}
+
+.ai-assistant-response.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.response-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: #6b46c1;
+  color: white;
+}
+
+.response-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.response-title .icon {
+  font-size: 18px;
+}
+
+.duration {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.close-button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.close-button:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.response-content {
+  padding: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.response-content h1,
+.response-content h2,
+.response-content h3 {
+  margin-top: 12px;
+  margin-bottom: 8px;
+}
+
+.response-content h1 {
+  font-size: 18px;
+}
+
+.response-content h2 {
+  font-size: 16px;
+}
+
+.response-content h3 {
+  font-size: 14px;
+}
+
+.response-content ul,
+.response-content ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.response-content li {
+  margin: 4px 0;
+}
+
+.response-content p {
+  margin: 8px 0;
+}
+
+.response-content code {
+  background-color: #f3f4f6;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+}
+
+.response-footer {
+  padding: 8px 16px;
+  background-color: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+}
+
+.auto-close-hint {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+}

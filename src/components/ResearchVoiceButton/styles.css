@@ -1,0 +1,93 @@
+.research-voice-button-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.research-voice-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.research-voice-button:hover:not(.disabled):not(.processing) {
+  background: #059669;
+}
+
+.research-voice-button.recording {
+  background: #ef4444;
+}
+
+.research-voice-button.recording:hover {
+  background: #dc2626;
+}
+
+.research-voice-button.processing {
+  background: #6b7280;
+  cursor: not-allowed;
+}
+
+.research-voice-button.disabled {
+  background: #e5e7eb;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.research-voice-button .icon {
+  font-size: 16px;
+}
+
+.research-voice-button .recording-indicator {
+  font-size: 12px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.research-voice-button .stop-text {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.research-voice-button .spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.recording-hint {
+  font-size: 12px;
+  color: #6b7280;
+  padding: 4px 8px;
+  background: #fef3c7;
+  border-radius: 4px;
+  text-align: center;
+}

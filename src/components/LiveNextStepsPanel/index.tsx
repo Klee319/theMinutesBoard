@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { Meeting, NextStep } from '@/types'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
+import { formatDate } from '@/utils/dateFormatter'
+import { AIAssistantButton } from '@/components/AIAssistantButton'
 
 interface LiveNextStepsPanelProps {
   meeting: Meeting | null
@@ -186,26 +188,34 @@ export default function LiveNextStepsPanel({
             </div>
           )}
         </div>
-        {nextSteps.length === 0 && meeting?.minutes && (
-          <button
-            onClick={handleGenerate}
-            disabled={isLocked || isGenerating}
-            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-              isLocked || isGenerating
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                : 'bg-green-600 text-white hover:bg-green-700'
-            }`}
-          >
-            {isGenerating ? (
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                <span>生成中...</span>
-              </div>
-            ) : (
-              '✨ 生成'
-            )}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {meeting && (
+            <AIAssistantButton 
+              meetingId={meeting.id} 
+              className="mr-2"
+            />
+          )}
+          {nextSteps.length === 0 && meeting?.minutes && (
+            <button
+              onClick={handleGenerate}
+              disabled={isLocked || isGenerating}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                isLocked || isGenerating
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              {isGenerating ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <span>生成中...</span>
+                </div>
+              ) : (
+                '✨ 生成'
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
@@ -259,7 +269,7 @@ export default function LiveNextStepsPanel({
                         {step.dueDate && (
                           <span className="flex items-center gap-1">
                             <span>📅</span>
-                            <span>{new Date(step.dueDate).toLocaleDateString('ja-JP')}</span>
+                            <span>{formatDate(step.dueDate)}</span>
                           </span>
                         )}
                         {step.notes && (

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Meeting, NextStep } from '@/types'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
+import { formatDate, toSafeDate, isOverdue } from '@/utils/dateFormatter'
 
 interface NextStepsBoardProps {
   meetings: Meeting[]
@@ -41,11 +42,14 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
       if (aPriority !== bPriority) return aPriority - bPriority
       
       // 最後に期限でソート
-      if (a.dueDate && b.dueDate) {
-        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
+      const aDate = toSafeDate(a.dueDate)
+      const bDate = toSafeDate(b.dueDate)
+      
+      if (aDate && bDate) {
+        return aDate.getTime() - bDate.getTime()
       }
-      if (a.dueDate) return -1
-      if (b.dueDate) return 1
+      if (aDate) return -1
+      if (bDate) return 1
       
       return 0
     })
@@ -209,19 +213,13 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
   }
 
   const formatDueDate = (date: string | Date | undefined): string => {
-    if (!date) {
-      return '期限未設定'
-    }
-    
-    const dueDate = new Date(date)
-    
-    // Invalid Date チェック
-    if (isNaN(dueDate.getTime())) {
+    const safeDate = toSafeDate(date)
+    if (!safeDate) {
       return '期限未設定'
     }
     
     const today = new Date()
-    const diffTime = dueDate.getTime() - today.getTime()
+    const diffTime = safeDate.getTime() - today.getTime()
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
     
     if (diffDays < 0) {
@@ -233,7 +231,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
     } else if (diffDays <= 7) {
       return `${diffDays}日後`
     } else {
-      return dueDate.toLocaleDateString('ja-JP')
+      return formatDate(safeDate)
     }
   }
 
@@ -472,7 +470,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                         </span>
                       )}
                       <span className={`flex items-center gap-1 ${
-                        step.dueDate && new Date(step.dueDate) < new Date() && step.status !== 'completed' ? 'text-red-600 font-medium' : ''
+                        isOverdue(step.dueDate) && step.status !== 'completed' ? 'text-red-600 font-medium' : ''
                       }`}>
                         <span>📅</span>
                         <span>{formatDueDate(step.dueDate)}</span>

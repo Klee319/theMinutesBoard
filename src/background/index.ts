@@ -14,10 +14,10 @@ let recordingTabId: number | null = null
 let isMinutesGenerating = false
 
 // ストレージ管理用の定数
-const STORAGE_WARNING_THRESHOLD = 0.8 // 80%使用で警告
-const STORAGE_CRITICAL_THRESHOLD = 0.95 // 95%使用でクリティカル
-const MAX_TRANSCRIPTS_PER_MEETING = 2000 // 1会議あたりの最大字幕数
-const TRANSCRIPT_BATCH_SIZE = 100 // バッチ処理する字幕の数
+const STORAGE_WARNING_THRESHOLD = 0.7 // 70%使用で警告
+const STORAGE_CRITICAL_THRESHOLD = 0.85 // 85%使用でクリティカル
+const MAX_TRANSCRIPTS_PER_MEETING = 1000 // 1会議あたりの最大字幕数
+const TRANSCRIPT_BATCH_SIZE = 50 // バッチ処理する字幕の数
 
 // 共有状態
 let sharedState: SharedState = {
@@ -100,7 +100,6 @@ chrome.runtime.onStartup.addListener(async () => {
     // 状態を復元
     currentMeetingId = recovery.session.meetingId
     recordingTabId = recovery.session.recordingTabId
-    isRecording = recovery.session.isRecording
     
     sharedState = {
       isRecording: true,
@@ -112,7 +111,7 @@ chrome.runtime.onStartup.addListener(async () => {
     }
     
     // キープアライブを再開
-    if (isRecording) {
+    if (recovery.session.isRecording) {
       startKeepAlive()
     }
   } else {
@@ -130,7 +129,13 @@ chrome.runtime.onStartup.addListener(async () => {
   }
   
   // ストレージ使用状況をチェック
-  await checkStorageUsage()
+  const storageStatus = await checkStorageUsage()
+  
+  // ストレージが逼迫している場合は起動時にクリーンアップ
+  if (storageStatus.percentage > STORAGE_WARNING_THRESHOLD) {
+    logger.warn(`High storage usage detected on startup: ${(storageStatus.percentage * 100).toFixed(1)}%`)
+    await performStorageCleanup()
+  }
   
   // デバッグ情報を出力
   if (logger.isDevelopment) {
@@ -146,7 +151,7 @@ function startSessionSave() {
   
   sessionSaveInterval = SessionRecovery.startPeriodicSave(() => ({
     meetingId: currentMeetingId,
-    isRecording,
+    isRecording: sharedState.isRecording,
     recordingTabId
   }))
 }
@@ -382,6 +387,42 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
         sendResponse({ success: true, state: sharedState })
         return false
         
+      case 'AI_ASSISTANT_START':
+        handleAIAssistantStart(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error starting AI assistant:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
+      case 'AI_ASSISTANT_STOP':
+        handleAIAssistantStop(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error stopping AI assistant:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
+      case 'AI_ASSISTANT_PROCESS':
+        handleAIAssistantProcess(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error processing AI assistant:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
+      case 'UPDATE_NEXTSTEPS_FROM_VOICE':
+        handleUpdateNextStepsFromVoice(message.payload)
+          .then(result => sendResponse(result))
+          .catch(error => {
+            console.error('Error updating nextsteps from voice:', error)
+            sendResponse({ success: false, error: error.message })
+          })
+        return true
+        
       default:
         sendResponse({ success: false, error: 'Unknown message type' })
         return false
@@ -392,20 +433,6 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
     return false
   }
 })
-
-// Content Scriptからの記録開始リクエストを処理（字幕チェック済み）
-async function handleActualStartRecording(tabId?: number, payload?: any): Promise<void> {
-  if (!tabId) {
-    throw new Error('No tab ID provided')
-  }
-  
-  // 既に記録中の場合は新しい記録を開始しない
-  if (currentMeetingId && recordingTabId === tabId) {
-    logger.debug('Already recording in this tab')
-    return
-  }
-  
-  logger.info('Starting recording after captions check passed')
 
 // Popupからの記録開始リクエストを処理（Content Scriptに字幕チェックを依頼）
 async function handleStartRecording(tabId?: number, payload?: any): Promise<void> {
@@ -442,6 +469,20 @@ async function handleStartRecording(tabId?: number, payload?: any): Promise<void
     throw error
   }
 }
+
+// Content Scriptからの記録開始リクエストを処理（字幕チェック済み）
+async function handleActualStartRecording(tabId?: number, payload?: any): Promise<void> {
+  if (!tabId) {
+    throw new Error('No tab ID provided')
+  }
+  
+  // 既に記録中の場合は新しい記録を開始しない
+  if (currentMeetingId && recordingTabId === tabId) {
+    logger.debug('Already recording in this tab')
+    return
+  }
+  
+  logger.info('Starting recording after captions check passed')
   
   currentMeetingId = generateMeetingId()
   recordingTabId = tabId
@@ -582,8 +623,8 @@ async function handleTranscriptUpdate(transcript: any): Promise<void> {
         // 字幕数の制限チェック
         if (meetings[meetingIndex].transcripts.length >= MAX_TRANSCRIPTS_PER_MEETING) {
           logger.warn(`Transcript limit reached for meeting ${currentMeetingId}`)
-          // 古い字幕を削除（最初の10%を削除）
-          const removeCount = Math.floor(MAX_TRANSCRIPTS_PER_MEETING * 0.1)
+          // 古い字幕を削除（最初の30%を削除）
+          const removeCount = Math.floor(MAX_TRANSCRIPTS_PER_MEETING * 0.3)
           meetings[meetingIndex].transcripts.splice(0, removeCount)
           logger.info(`Removed ${removeCount} old transcripts`)
         }
@@ -599,16 +640,59 @@ async function handleTranscriptUpdate(transcript: any): Promise<void> {
         participants.add(transcript.speaker)
         meetings[meetingIndex].participants = Array.from(participants)
         
+        // AIアシスタントセッションにも字幕を追加
+        if (currentMeetingId && aiAssistantSessions.has(currentMeetingId)) {
+          const session = aiAssistantSessions.get(currentMeetingId)
+          if (session) {
+            session.transcripts.push({
+              ...transcript,
+              id: generateTranscriptId(),
+              meetingId: currentMeetingId,
+              timestamp: new Date()
+            })
+          }
+        }
+        
         // ストレージ使用状況をチェック
         const storageCheck = await checkStorageUsage()
         if (storageCheck.percentage > STORAGE_CRITICAL_THRESHOLD) {
           logger.error('Storage critically full, performing emergency cleanup')
           await performEmergencyCleanup()
+          
+          // 再度ストレージをチェック
+          const recheckStorage = await checkStorageUsage()
+          if (recheckStorage.percentage > 0.95) {
+            // それでも容量が足りない場合は、現在の会議の字幕を大幅に削減
+            meetings[meetingIndex].transcripts = meetings[meetingIndex].transcripts.slice(-100)
+            logger.warn('Extreme storage pressure - kept only last 100 transcripts')
+          }
         }
         
         chrome.storage.local.set({ meetings }, () => {
           if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message))
+            // ストレージエラーの場合、さらに古いデータを削除して再試行
+            if (chrome.runtime.lastError.message.includes('quota')) {
+              logger.error('Storage quota exceeded, attempting to free space')
+              
+              // 最も古い会議を削除
+              if (meetings.length > 1) {
+                meetings.shift() // 最初の要素を削除
+                
+                // 再度保存を試みる
+                chrome.storage.local.set({ meetings }, () => {
+                  if (chrome.runtime.lastError) {
+                    reject(new Error('Storage critically full: ' + chrome.runtime.lastError.message))
+                  } else {
+                    logger.info('Freed space by removing oldest meeting')
+                    resolve()
+                  }
+                })
+              } else {
+                reject(new Error('Storage quota exceeded and no meetings to delete'))
+              }
+            } else {
+              reject(new Error(chrome.runtime.lastError.message))
+            }
           } else {
             resolve()
           }
@@ -1502,25 +1586,52 @@ async function performEmergencyCleanup(): Promise<void> {
   try {
     const meetings = await storageService.getMeetings()
     
-    // 最も古い会議から削除（全体の30%）
-    const deleteCount = Math.max(1, Math.floor(meetings.length * 0.3))
+    // 段階的なクリーンアップ戦略
+    // 1. まず7日以上前の会議を削除
+    const sevenDaysAgo = new Date()
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
     
-    // 日付処理を安全に行う
-    const sortedMeetings = meetings.sort((a, b) => {
+    const oldMeetings = meetings.filter(m => {
+      const meetingDate = m.startTime instanceof Date ? m.startTime : new Date(m.startTime || Date.now())
+      return meetingDate < sevenDaysAgo
+    })
+    
+    if (oldMeetings.length > 0) {
+      for (const meeting of oldMeetings) {
+        await storageService.deleteMeeting(meeting.id)
+        logger.info(`Emergency deleted old meeting: ${meeting.id}`)
+      }
+      
+      // ストレージ再チェック
+      const storageCheck = await checkStorageUsage()
+      if (storageCheck.percentage < STORAGE_CRITICAL_THRESHOLD) {
+        return // 十分な空き容量が確保できた
+      }
+    }
+    
+    // 2. それでも足りない場合は、最も古い会議から20%削除
+    const remainingMeetings = await storageService.getMeetings()
+    const deleteCount = Math.max(1, Math.floor(remainingMeetings.length * 0.2))
+    
+    const sortedMeetings = remainingMeetings.sort((a, b) => {
       const dateA = a.startTime instanceof Date ? a.startTime : new Date(a.startTime || Date.now())
       const dateB = b.startTime instanceof Date ? b.startTime : new Date(b.startTime || Date.now())
       return dateA.getTime() - dateB.getTime()
     })
     
     for (let i = 0; i < deleteCount && i < sortedMeetings.length; i++) {
-      await storageService.deleteMeeting(sortedMeetings[i].id)
-      logger.info(`Emergency deleted meeting: ${sortedMeetings[i].id}`)
+      // 現在記録中の会議は削除しない
+      if (sortedMeetings[i].id !== currentMeetingId) {
+        await storageService.deleteMeeting(sortedMeetings[i].id)
+        logger.info(`Emergency deleted meeting: ${sortedMeetings[i].id}`)
+      }
     }
     
-    // 現在の会議の古い字幕も削除
+    // 3. 現在の会議の古い字幕も削除（500件を超える場合）
     if (currentMeetingId) {
       const currentMeeting = await storageService.getMeeting(currentMeetingId)
       if (currentMeeting && currentMeeting.transcripts.length > 500) {
+        // 最新500件を保持
         currentMeeting.transcripts = currentMeeting.transcripts.slice(-500)
         await storageService.saveMeeting(currentMeeting)
         logger.info('Trimmed current meeting transcripts to last 500')
@@ -1528,5 +1639,297 @@ async function performEmergencyCleanup(): Promise<void> {
     }
   } catch (error) {
     logger.error('Emergency cleanup failed:', error)
+  }
+}
+
+// AIアシスタントのセッション管理（メモリリーク対策: 最大10セッションを保持）
+const MAX_AI_SESSIONS = 10
+const aiAssistantSessions = new Map<string, {
+  meetingId: string
+  startTime: Date
+  transcripts: Transcript[]
+  type: 'nextsteps' | 'research'
+}>()
+
+// 古いセッションを定期的にクリーンアップ
+setInterval(() => {
+  if (aiAssistantSessions.size > MAX_AI_SESSIONS) {
+    const sortedSessions = Array.from(aiAssistantSessions.entries())
+      .sort((a, b) => a[1].startTime.getTime() - b[1].startTime.getTime())
+    
+    // 最も古いセッションから削除
+    const deleteCount = aiAssistantSessions.size - MAX_AI_SESSIONS
+    for (let i = 0; i < deleteCount; i++) {
+      aiAssistantSessions.delete(sortedSessions[i][0])
+      logger.info(`Cleaned up old AI session: ${sortedSessions[i][0]}`)
+    }
+  }
+}, 60000) // 1分ごとにチェック
+
+// 現在アクティブな音声記録セッション
+let activeVoiceSession: { meetingId: string; type: 'nextsteps' | 'research' } | null = null
+
+// AIアシスタント録音開始
+async function handleAIAssistantStart(payload: { meetingId: string; type?: 'nextsteps' | 'research' }): Promise<{ success: boolean; error?: string }> {
+  const { meetingId, type = 'nextsteps' } = payload
+  
+  if (!meetingId) {
+    return { success: false, error: 'Meeting ID is required' }
+  }
+  
+  // 他の音声記録セッションが実行中かチェック
+  if (activeVoiceSession) {
+    const sessionType = activeVoiceSession.type === 'nextsteps' ? 'ネクストステップ編集' : 'リサーチ'
+    return { 
+      success: false, 
+      error: `他の音声記録（${sessionType}）が実行中です。先に停止してください。` 
+    }
+  }
+  
+  // 既存のセッションがある場合は削除
+  if (aiAssistantSessions.has(meetingId)) {
+    logger.warn('AI Assistant session already exists for this meeting, replacing it')
+    aiAssistantSessions.delete(meetingId)
+  }
+  
+  // 新しいセッションを開始
+  aiAssistantSessions.set(meetingId, {
+    meetingId,
+    startTime: new Date(),
+    transcripts: [],
+    type
+  })
+  
+  // アクティブセッションを記録
+  activeVoiceSession = { meetingId, type }
+  
+  logger.info(`AI Assistant recording started for meeting: ${meetingId}, type: ${type}`)
+  return { success: true }
+}
+
+// AIアシスタント録音停止
+async function handleAIAssistantStop(payload: { meetingId: string }): Promise<{ success: boolean; error?: string; transcripts?: Transcript[] }> {
+  const { meetingId } = payload
+  
+  if (!meetingId) {
+    return { success: false, error: 'Meeting ID is required' }
+  }
+  
+  const session = aiAssistantSessions.get(meetingId)
+  if (!session) {
+    return { success: false, error: 'No active AI Assistant session found' }
+  }
+  
+  // セッションを終了して記録された字幕を返す
+  const transcripts = session.transcripts
+  aiAssistantSessions.delete(meetingId)
+  
+  // アクティブセッションをクリア
+  if (activeVoiceSession?.meetingId === meetingId) {
+    activeVoiceSession = null
+  }
+  
+  logger.info(`AI Assistant recording stopped for meeting: ${meetingId}, recorded ${transcripts.length} transcripts`)
+  return { success: true, transcripts }
+}
+
+// AIアシスタントで記録した内容を処理
+async function handleAIAssistantProcess(payload: { meetingId: string; recordingDuration: number }): Promise<{ success: boolean; error?: string }> {
+  const { meetingId, recordingDuration } = payload
+  
+  if (!meetingId) {
+    return { success: false, error: 'Meeting ID is required' }
+  }
+  
+  try {
+    // 会議データを取得
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meeting = meetings.find(m => m.id === meetingId)
+    if (!meeting) {
+      return { success: false, error: 'Meeting not found' }
+    }
+    
+    // AI処理用のセッション取得（既に削除されている可能性があるため、最近の字幕を使用）
+    const recentTranscripts = meeting.transcripts.slice(-50) // 最近の50件の字幕を使用
+    
+    if (recentTranscripts.length === 0) {
+      return { success: false, error: 'No transcripts available for processing' }
+    }
+    
+    // 設定を取得
+    const settings = await new Promise<UserSettings>((resolve) => {
+      chrome.storage.local.get(['settings'], (result) => {
+        resolve(result.settings || {})
+      })
+    })
+    
+    // AIサービスを使用してネクストステップを更新
+    const aiService = AIServiceFactory.createService(settings)
+    
+    // 録音された内容から指示を抽出
+    const instructions = recentTranscripts
+      .map(t => t.content)
+      .join(' ')
+    
+    // プロンプトを構築
+    const prompt = `
+以下の音声指示に基づいて、ネクストステップの編集やリサーチを実行してください。
+
+【音声指示内容】
+${instructions}
+
+【現在のネクストステップ】
+${meeting.nextSteps?.map(ns => `- ${ns.task} (担当: ${ns.assignee || '未定'}, 期限: ${ns.dueDate ? new Date(ns.dueDate).toLocaleDateString('ja-JP') : '未定'})`).join('\n') || 'なし'}
+
+【実行内容】
+1. 指示に従ってネクストステップを編集する場合：
+   - 新しいタスクの追加
+   - 既存タスクの修正
+   - 担当者や期限の更新
+   - タスクの削除
+
+2. リサーチや調査を求められた場合：
+   - 会議内容から関連情報を抽出
+   - 質問に対する回答を提供
+
+【回答形式】
+実行した内容と結果を簡潔に説明してください。
+`
+    
+    const response = await aiService.generateText(prompt, {
+      maxTokens: 2000,
+      temperature: 0.7
+    })
+    
+    // レスポンスをviewerに通知
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        if (tab.id && tab.url?.includes('viewer.html')) {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'AI_ASSISTANT_RESPONSE',
+            payload: {
+              meetingId,
+              response,
+              duration: recordingDuration
+            }
+          }).catch(() => {})
+        }
+      })
+    })
+    
+    logger.info('AI Assistant processing completed')
+    return { success: true }
+  } catch (error) {
+    logger.error('Error processing AI assistant:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+}
+
+// 音声指示によるネクストステップ更新
+async function handleUpdateNextStepsFromVoice(payload: { meetingId: string; voiceInstructions: string }): Promise<{ success: boolean; error?: string }> {
+  const { meetingId, voiceInstructions } = payload
+  
+  if (!meetingId || !voiceInstructions) {
+    return { success: false, error: 'Meeting ID and voice instructions are required' }
+  }
+  
+  try {
+    // 会議データを取得
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meeting = meetings.find(m => m.id === meetingId)
+    if (!meeting) {
+      return { success: false, error: 'Meeting not found' }
+    }
+    
+    // 設定を取得
+    const settings = await new Promise<UserSettings>((resolve) => {
+      chrome.storage.local.get(['settings'], (result) => {
+        resolve(result.settings || {})
+      })
+    })
+    
+    // AIサービスを使用してネクストステップを更新
+    const aiService = AIServiceFactory.createService(settings)
+    
+    // プロンプトを構築
+    const prompt = `
+以下の音声指示に基づいて、ネクストステップリストを更新してください。
+
+【音声指示】
+${voiceInstructions}
+
+【現在のネクストステップ】
+${meeting.nextSteps?.map(ns => `- ${ns.task} (担当: ${ns.assignee || '未定'}, 期限: ${ns.dueDate ? new Date(ns.dueDate).toLocaleDateString('ja-JP') : '未定'})`).join('\n') || 'なし'}
+
+【実行内容】
+1. 新しいタスクの追加
+2. 既存タスクの修正
+3. 担当者や期限の更新
+4. タスクの削除
+
+指示に従って更新されたネクストステップリストをJSON形式で返してください。
+`
+    
+    const updatedNextStepsJson = await aiService.generateText(prompt, {
+      maxTokens: 2000,
+      temperature: 0.3
+    })
+    
+    // JSONをパース
+    let updatedNextSteps
+    try {
+      updatedNextSteps = JSON.parse(updatedNextStepsJson)
+    } catch (parseError) {
+      // JSONパースエラーの場合は、AIに再度生成を依頼
+      const retryPrompt = `${prompt}\n\n重要: 必ず有効なJSON形式で返してください。`
+      const retryJson = await aiService.generateText(retryPrompt, {
+        maxTokens: 2000,
+        temperature: 0.3
+      })
+      updatedNextSteps = JSON.parse(retryJson)
+    }
+    
+    // 会議データを更新
+    meeting.nextSteps = updatedNextSteps
+    
+    // 保存
+    await new Promise<void>((resolve) => {
+      chrome.storage.local.set({ meetings }, () => {
+        resolve()
+      })
+    })
+    
+    return { success: true }
+  } catch (error) {
+    logger.error('Error updating NextSteps from voice:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+}
+
+// 字幕更新時にAIアシスタントセッションにも記録
+const originalHandleTranscriptUpdate = handleTranscriptUpdate
+handleTranscriptUpdate = async function(payload: any): Promise<void> {
+  // 元の処理を実行
+  await originalHandleTranscriptUpdate(payload)
+  
+  // AIアシスタントセッションがある場合は字幕を記録
+  if (currentMeetingId) {
+    const session = aiAssistantSessions.get(currentMeetingId)
+    if (session && payload?.transcript) {
+      session.transcripts.push({
+        ...payload.transcript,
+        timestamp: new Date()
+      })
+    }
   }
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Meeting, NextStep } from '@/types'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 import { logger } from '@/utils/logger'
+import { formatDate } from '@/utils/dateFormatter'
 
 interface MeetingNextStepsProps {
   meeting: Meeting
@@ -178,7 +179,7 @@ export default function MeetingNextSteps({ meeting }: MeetingNextStepsProps) {
                       {step.dueDate && (
                         <span className="flex items-center gap-1">
                           <span>📅</span>
-                          <span>{new Date(step.dueDate).toLocaleDateString('ja-JP')}</span>
+                          <span>{formatDate(step.dueDate)}</span>
                         </span>
                       )}
                       {step.notes && (

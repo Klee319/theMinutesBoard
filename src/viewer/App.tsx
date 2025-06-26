@@ -18,7 +18,8 @@ function App() {
   const [isDownloadDropdownOpen, setIsDownloadDropdownOpen] = useState(false)
   const [isMinutesGenerating, setIsMinutesGenerating] = useState(false)
   const [currentTab, setCurrentTab] = useState<'history' | 'nextsteps'>('history')
-  const [showNextStepsPanel, setShowNextStepsPanel] = useState(false)
+  const [showNextStepsPanel, setShowNextStepsPanel] = useState(true)
+  const [showResearchPanel, setShowResearchPanel] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
 
@@ -293,7 +294,53 @@ function App() {
               </div>
             </div>
             
-            <div className="flex items-center gap-2 min-h-[40px]">
+            <div className="flex items-center gap-4 min-h-[40px]">
+              {/* ライブモード時のトグルスイッチ */}
+              {isLiveMode && (
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-500">表示/非表示切り替え：</span>
+                  {/* ネクストステップトグル */}
+                  <label className="flex items-center gap-2 cursor-pointer" title="ネクストステップパネルの表示/非表示を切り替えます">
+                    <span className="text-sm text-gray-700">📝 ネクストステップ</span>
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={showNextStepsPanel}
+                        onChange={(e) => setShowNextStepsPanel(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`w-10 h-6 rounded-full transition-colors ${
+                        showNextStepsPanel ? 'bg-blue-600' : 'bg-gray-300'
+                      }`}>
+                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
+                          showNextStepsPanel ? 'translate-x-4' : 'translate-x-0'
+                        }`} />
+                      </div>
+                    </div>
+                  </label>
+                  
+                  {/* リサーチトグル */}
+                  <label className="flex items-center gap-2 cursor-pointer" title="リサーチパネルの表示/非表示を切り替えます">
+                    <span className="text-sm text-gray-700">🔍 リサーチ</span>
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={showResearchPanel}
+                        onChange={(e) => setShowResearchPanel(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`w-10 h-6 rounded-full transition-colors ${
+                        showResearchPanel ? 'bg-green-600' : 'bg-gray-300'
+                      }`}>
+                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
+                          showResearchPanel ? 'translate-x-4' : 'translate-x-0'
+                        }`} />
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              )}
+              
               {displayMeeting && (
                 <>
                   {isLiveMode && currentMeeting && (
@@ -303,20 +350,6 @@ function App() {
                         className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors border border-red-600 hover:border-red-700"
                       >
                         ⏹ 記録停止
-                      </button>
-                      <button
-                        onClick={generateMinutes}
-                        disabled={isMinutesGenerating}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {isMinutesGenerating ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            <span>生成中...</span>
-                          </>
-                        ) : (
-                          currentMeeting.minutes ? '📝 議事録を更新' : '✨ 議事録生成'
-                        )}
                       </button>
                     </>
                   )}
@@ -389,6 +422,8 @@ function App() {
             onGenerateMinutes={generateMinutes}
             onStopRecording={stopRecording}
             isRecording={isRecording}
+            showNextStepsPanel={showNextStepsPanel}
+            showResearchPanel={showResearchPanel}
           />
         )}
 

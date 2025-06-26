@@ -116,6 +116,9 @@ export type MessageType =
   | 'MINUTES_GENERATION_STARTED'
   | 'MINUTES_GENERATION_COMPLETED'
   | 'MINUTES_GENERATION_FAILED'
+  | 'AI_ASSISTANT_START'
+  | 'AI_ASSISTANT_STOP'
+  | 'AI_ASSISTANT_PROCESS'
 
 export interface StorageData {
   meetings: Meeting[]
@@ -141,6 +144,9 @@ export interface AIAssistantSession {
   messages: AIConversationMessage[]
   createdAt: Date
   lastActivity: Date
+  isRecording?: boolean
+  recordingStartTime?: Date
+  recordedTranscripts?: Transcript[]
 }
 
 export interface AIConversationMessage {

@@ -102,28 +102,6 @@ export default function LiveMinutesPanel({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {onToggleResearchPanel && (
-            <button
-              onClick={() => {
-                const newShowResearch = !showResearchPanel
-                onToggleResearchPanel(newShowResearch)
-                
-                // モバイルでリサーチタブがアクティブな場合の処理
-                if (!newShowResearch && window.innerWidth < 768) {
-                  // モバイルでリサーチパネルを非表示にした場合、メッセージを送信してタブを切り替え
-                  window.dispatchEvent(new CustomEvent('researchPanelToggled', { detail: { show: false } }))
-                }
-              }}
-              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                showResearchPanel
-                  ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-              title={showResearchPanel ? 'リサーチパネルを非表示' : 'リサーチパネルを表示'}
-            >
-              🔍 リサーチ
-            </button>
-          )}
           <button
             onClick={onManualUpdate}
             disabled={isLocked || isGenerating}
