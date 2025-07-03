@@ -4,6 +4,7 @@ import NextStepsBoard from '@/components/NextStepsBoard'
 import MeetingNextSteps from '@/components/MeetingNextSteps'
 import ResizablePanel from '@/components/ResizablePanel'
 import LiveModeLayout from '@/components/LiveModeLayout'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 import { formatMarkdownToHTML } from '@/utils/markdown'
@@ -72,7 +73,8 @@ function App() {
           if (isLiveMode) {
             setIsLiveMode(false)
             setCurrentTab('history')
-            setCurrentMeeting(null)
+            // currentMeetingは履歴タブで表示するために保持
+            // setCurrentMeeting(null) を削除
           }
           
           loadData()
@@ -162,19 +164,31 @@ function App() {
   const loadData = () => {
     chrome.storage.local.get(['meetings', 'currentMeetingId'], (result) => {
       logger.debug('Viewer loading data - meetings count:', result.meetings?.length || 0)
+      logger.debug('Viewer loading data - currentMeetingId:', result.currentMeetingId)
+      logger.debug('Viewer loading data - isLiveMode:', isLiveMode)
+      
       const meetings = result.meetings || []
       setAllMeetings(meetings)
       
       if (result.currentMeetingId && isLiveMode) {
         const current = meetings.find((m: Meeting) => m.id === result.currentMeetingId)
         if (current) {
+          logger.debug('Current meeting found:', current.id)
           setCurrentMeeting(current)
           setLastUpdated(new Date())
           // 議事録生成完了を検知
           if (current.minutes && isMinutesGenerating) {
             setIsMinutesGenerating(false)
           }
+        } else {
+          logger.warn('Current meeting not found in meetings list:', result.currentMeetingId)
+          // currentMeetingIdがあるが会議が見つからない場合は、currentMeetingをnullにしない
+          // 既存のcurrentMeetingを保持する
         }
+      } else if (!result.currentMeetingId && isLiveMode) {
+        // ライブモードだがcurrentMeetingIdがない場合
+        logger.debug('Live mode but no currentMeetingId')
+        // 明示的にnullに設定するのではなく、既存の状態を保持
       }
     })
   }
@@ -452,15 +466,17 @@ function App() {
 
         {/* ライブモード - 3パネル縦積みレイアウト */}
         {isLiveMode && (
-          <LiveModeLayout
-            meeting={currentMeeting}
-            isMinutesGenerating={isMinutesGenerating}
-            onGenerateMinutes={generateMinutes}
-            onStopRecording={stopRecording}
-            isRecording={isRecording}
-            showNextStepsPanel={showNextStepsPanel}
-            showResearchPanel={showResearchPanel}
-          />
+          <ErrorBoundary>
+            <LiveModeLayout
+              meeting={currentMeeting}
+              isMinutesGenerating={isMinutesGenerating}
+              onGenerateMinutes={generateMinutes}
+              onStopRecording={stopRecording}
+              isRecording={isRecording}
+              showNextStepsPanel={showNextStepsPanel}
+              showResearchPanel={showResearchPanel}
+            />
+          </ErrorBoundary>
         )}
 
         {/* 履歴タブ */}

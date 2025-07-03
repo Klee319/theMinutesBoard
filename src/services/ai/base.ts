@@ -217,7 +217,16 @@ export abstract class BaseAIService {
     const MAX_PROMPT_SIZE = 200000
     
     // 会議時間の計算
-    const duration = transcripts ? this.calculateDuration(transcripts) : 0
+    let duration = 0
+    if (promptType === 'history' && meetingInfo?.startTime && meetingInfo?.endTime) {
+      // 履歴用議事録の場合は、正確な開始時刻と終了時刻から計算
+      const start = meetingInfo.startTime instanceof Date ? meetingInfo.startTime : new Date(meetingInfo.startTime)
+      const end = meetingInfo.endTime instanceof Date ? meetingInfo.endTime : new Date(meetingInfo.endTime)
+      duration = Math.floor((end.getTime() - start.getTime()) / 1000) // 秒単位
+    } else {
+      // その他の場合は、transcriptsから推定
+      duration = transcripts ? this.calculateDuration(transcripts) : 0
+    }
     const hours = Math.floor(duration / 3600)
     const minutes = Math.floor((duration % 3600) / 60)
     const durationText = `${hours > 0 ? `${hours}時間` : ''}${minutes}分`
@@ -238,11 +247,19 @@ export abstract class BaseAIService {
       userName: settings?.userName || '不明な参加者',
       meetingDate: meetingInfo?.startTime || new Date(),
       startTime: meetingInfo?.startTime ? meetingInfo.startTime.toLocaleString('ja-JP') : new Date().toLocaleString('ja-JP'),
+      endTime: meetingInfo?.endTime ? meetingInfo.endTime.toLocaleString('ja-JP') : '',
       participants: participants.join(', '),
       duration: durationText,
       transcripts: formattedTranscripts,
       speakerMap: transcripts ? this.buildSpeakerMap(transcripts) : {},
       currentTime: new Date().toLocaleString('ja-JP'),
+      meetingTitle: meetingInfo?.startTime ? 
+        meetingInfo.startTime.toLocaleDateString('ja-JP', { 
+          year: 'numeric', 
+          month: '2-digit', 
+          day: '2-digit' 
+        }) + ' の会議' : 
+        '会議',
     }
     
     // デバッグログ: テンプレート変数の内容（transcriptsフィールドは長さのみ）

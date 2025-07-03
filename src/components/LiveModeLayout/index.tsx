@@ -149,6 +149,14 @@ export default function LiveModeLayout({
   showNextStepsPanel: showNextStepsPanelProp = true,
   showResearchPanel: showResearchPanelProp = true
 }: LiveModeLayoutProps) {
+  // デバッグログ
+  logger.debug('LiveModeLayout render:', { 
+    meeting: meeting?.id, 
+    isMinutesGenerating, 
+    isRecording,
+    showNextStepsPanel: showNextStepsPanelProp,
+    showResearchPanel: showResearchPanelProp
+  })
   // 更新処理の排他制御
   const [isUpdating, setIsUpdating] = useState(false)
   const [updateSource, setUpdateSource] = useState<'manual' | null>(null)
@@ -248,6 +256,19 @@ export default function LiveModeLayout({
     }
   }, [showNextStepsPanel, showResearchPanel])
 
+  // meetingがnullの場合のフォールバック表示
+  if (!meeting) {
+    return (
+      <div className="h-[calc(100vh-120px)] md:h-[calc(100vh-140px)] flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="text-6xl mb-4">🎙️</div>
+          <p className="text-xl text-gray-600 mb-2">記録中の会議がありません</p>
+          <p className="text-gray-500">Google Meetで記録を開始してください</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
       {isMobile ? (
@@ -271,14 +292,21 @@ export default function LiveModeLayout({
             className="bg-white rounded-lg shadow-sm overflow-hidden"
             style={{ 
               width: (() => {
-                if (!showNextStepsPanel && !showResearchPanel) {
-                  return '100%';
-                } else if (!showNextStepsPanel && showResearchPanel) {
-                  return `${(leftPanelWidth / (leftPanelWidth + rightPanelWidth)) * 100}%`;
-                } else if (showNextStepsPanel && !showResearchPanel) {
-                  return `${(leftPanelWidth / (leftPanelWidth + middlePanelWidth)) * 100}%`;
-                } else {
-                  return `${leftPanelWidth}%`;
+                try {
+                  if (!showNextStepsPanel && !showResearchPanel) {
+                    return '100%';
+                  } else if (!showNextStepsPanel && showResearchPanel) {
+                    const total = leftPanelWidth + rightPanelWidth
+                    return total > 0 ? `${(leftPanelWidth / total) * 100}%` : '70%';
+                  } else if (showNextStepsPanel && !showResearchPanel) {
+                    const total = leftPanelWidth + middlePanelWidth
+                    return total > 0 ? `${(leftPanelWidth / total) * 100}%` : '50%';
+                  } else {
+                    return `${leftPanelWidth}%`;
+                  }
+                } catch (error) {
+                  logger.error('Error calculating panel width:', error)
+                  return '40%' // デフォルト値
                 }
               })()
             }}
@@ -368,11 +396,16 @@ export default function LiveModeLayout({
               className="bg-white rounded-lg shadow-sm overflow-hidden"
               style={{
                 width: (() => {
-                  if (!showResearchPanel) {
-                    // リサーチパネルが非表示の場合、残りの幅を使用
-                    return `${middlePanelWidth}%`;
-                  } else {
-                    return `${middlePanelWidth}%`;
+                  try {
+                    if (!showResearchPanel) {
+                      // リサーチパネルが非表示の場合、残りの幅を使用
+                      return `${middlePanelWidth}%`;
+                    } else {
+                      return `${middlePanelWidth}%`;
+                    }
+                  } catch (error) {
+                    logger.error('Error calculating next steps panel width:', error)
+                    return '40%' // デフォルト値
                   }
                 })()
               }}
@@ -474,12 +507,18 @@ export default function LiveModeLayout({
                 className="bg-white rounded-lg shadow-sm overflow-hidden"
                 style={{ 
                   width: (() => {
-                    if (!showNextStepsPanel) {
-                      // ネクストステップパネルが非表示の場合
-                      return `${(rightPanelWidth / (leftPanelWidth + rightPanelWidth)) * 100}%`;
-                    } else {
-                      // 3つすべて表示されている場合
-                      return `${rightPanelWidth}%`;
+                    try {
+                      if (!showNextStepsPanel) {
+                        // ネクストステップパネルが非表示の場合
+                        const total = leftPanelWidth + rightPanelWidth
+                        return total > 0 ? `${(rightPanelWidth / total) * 100}%` : '30%';
+                      } else {
+                        // 3つすべて表示されている場合
+                        return `${rightPanelWidth}%`;
+                      }
+                    } catch (error) {
+                      logger.error('Error calculating research panel width:', error)
+                      return '20%' // デフォルト値
                     }
                   })()
                 }}

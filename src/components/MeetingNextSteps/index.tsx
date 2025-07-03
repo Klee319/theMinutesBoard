@@ -16,6 +16,24 @@ export default function MeetingNextSteps({ meeting }: MeetingNextStepsProps) {
     setNextSteps(meeting.nextSteps || [])
   }, [meeting])
 
+  // ネクストステップ生成完了メッセージを受信
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if (message.type === 'NEXTSTEPS_GENERATED' && message.payload?.meetingId === meeting.id) {
+        logger.debug('MeetingNextSteps received NEXTSTEPS_GENERATED:', message.payload)
+        if (message.payload.nextSteps) {
+          setNextSteps(message.payload.nextSteps)
+          setIsGenerating(false)
+        }
+      }
+    }
+
+    chrome.runtime.onMessage.addListener(handleMessage)
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleMessage)
+    }
+  }, [meeting.id])
+
   const handleGenerate = async () => {
     if (!meeting.minutes) {
       alert('先に議事録を生成してください')
@@ -105,6 +123,25 @@ export default function MeetingNextSteps({ meeting }: MeetingNextStepsProps) {
       <div className="p-4 border-b">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">ネクストステップ</h3>
+          {nextSteps.length > 0 && (
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating || !meeting.minutes}
+              className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            >
+              {isGenerating ? (
+                <>
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <span>更新中...</span>
+                </>
+              ) : (
+                <>
+                  <span>🔄</span>
+                  <span>更新</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
         
         {nextSteps.length === 0 && (

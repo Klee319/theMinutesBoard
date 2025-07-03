@@ -991,21 +991,34 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
                 })
               })
               
-              // ネクストステップを自動生成（初回生成時のみ）
-              if (!meetings[meetingIndex].nextSteps || meetings[meetingIndex].nextSteps.length === 0) {
-                console.log('Auto-generating next steps for meeting:', currentMeetingId)
-                handleGenerateNextSteps({ meetingId: currentMeetingId, userPrompt: '' })
-                  .then((result) => {
-                    if (result.success) {
-                      console.log('Next steps auto-generated successfully')
-                    } else {
-                      console.error('Failed to auto-generate next steps:', result.error)
-                    }
-                  })
-                  .catch((error) => {
-                    console.error('Error auto-generating next steps:', error)
-                  })
-              }
+              // ネクストステップを自動生成（議事録更新時は常に再生成）
+              console.log('Auto-generating/updating next steps for meeting:', currentMeetingId)
+              handleGenerateNextSteps({ meetingId: currentMeetingId, userPrompt: '' })
+                .then((result) => {
+                  if (result.success) {
+                    console.log('Next steps auto-generated/updated successfully')
+                    
+                    // 全タブにネクストステップ更新完了を通知
+                    chrome.tabs.query({}, (tabs) => {
+                      tabs.forEach(tab => {
+                        if (tab.id) {
+                          chrome.tabs.sendMessage(tab.id, {
+                            type: 'NEXTSTEPS_GENERATED',
+                            payload: {
+                              meetingId: currentMeetingId,
+                              nextSteps: result.nextSteps
+                            }
+                          }).catch(() => {})
+                        }
+                      })
+                    })
+                  } else {
+                    console.error('Failed to auto-generate/update next steps:', result.error)
+                  }
+                })
+                .catch((error) => {
+                  console.error('Error auto-generating/updating next steps:', error)
+                })
               
               resolve({ success: true, minutes })
             }

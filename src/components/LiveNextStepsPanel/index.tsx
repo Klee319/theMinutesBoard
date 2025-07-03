@@ -68,6 +68,7 @@ export default function LiveNextStepsPanel({
     return () => clearInterval(countdownTimer)
   }, [nextUpdateTime, isAutoUpdating])
 
+  // meetingからネクストステップを読み込む
   useEffect(() => {
     if (meeting?.nextSteps) {
       setNextSteps(meeting.nextSteps)
@@ -75,6 +76,31 @@ export default function LiveNextStepsPanel({
       setNextSteps([])
     }
   }, [meeting])
+
+  // ネクストステップ生成完了メッセージを受信
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if (message.type === 'NEXTSTEPS_GENERATED' && message.payload?.meetingId === meeting?.id) {
+        logger.debug('LiveNextStepsPanel received NEXTSTEPS_GENERATED:', message.payload)
+        if (message.payload.nextSteps) {
+          setNextSteps(message.payload.nextSteps)
+          // 自動更新後の処理
+          if (isAutoUpdating) {
+            setIsAutoUpdating(false)
+            if (autoUpdateInterval > 0) {
+              const intervalMs = autoUpdateInterval * TIMING_CONSTANTS.MINUTES_TO_MS
+              setNextUpdateTime(new Date(Date.now() + intervalMs))
+            }
+          }
+        }
+      }
+    }
+
+    chrome.runtime.onMessage.addListener(handleMessage)
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleMessage)
+    }
+  }, [meeting?.id, isAutoUpdating, autoUpdateInterval])
 
   const handleGenerate = async () => {
     if (!meeting?.minutes) {
