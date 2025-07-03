@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Meeting } from '@/types'
 import { logger } from '@/utils/logger'
 import { formatMarkdownToHTML } from '@/utils/markdown'
+import { TIMING_CONSTANTS } from '@/constants'
 
 interface LiveMinutesPanelProps {
   meeting: Meeting | null
@@ -12,11 +13,6 @@ interface LiveMinutesPanelProps {
   showResearchPanel?: boolean
   onToggleResearchPanel?: (show: boolean) => void
 }
-
-// 定数定義
-const AUTO_UPDATE_COMPLETE_DELAY = 2000 // 自動更新完了後の遅延時間（ms）
-const COUNTDOWN_UPDATE_INTERVAL = 1000 // カウントダウン更新間隔（ms）
-const MINUTES_TO_MS = 60 * 1000 // 分をミリ秒に変換する係数
 
 export default function LiveMinutesPanel({
   meeting,
@@ -52,12 +48,12 @@ export default function LiveMinutesPanel({
       return
     }
 
-    const intervalMs = autoUpdateInterval * MINUTES_TO_MS
+    const intervalMs = autoUpdateInterval * TIMING_CONSTANTS.MINUTES_TO_MS
     const timer = setInterval(() => {
       setIsAutoUpdating(true)
       onManualUpdate()
       // 更新完了後にisAutoUpdatingをfalseにする処理
-      setTimeout(() => setIsAutoUpdating(false), AUTO_UPDATE_COMPLETE_DELAY)
+      setTimeout(() => setIsAutoUpdating(false), TIMING_CONSTANTS.AUTO_UPDATE_COMPLETE_DELAY)
       setNextUpdateTime(new Date(Date.now() + intervalMs))
     }, intervalMs)
 
@@ -76,7 +72,7 @@ export default function LiveMinutesPanel({
       if (nextUpdateTime.getTime() <= now) {
         clearInterval(countdownTimer)
       }
-    }, COUNTDOWN_UPDATE_INTERVAL)
+    }, TIMING_CONSTANTS.COUNTDOWN_UPDATE_INTERVAL)
 
     return () => clearInterval(countdownTimer)
   }, [nextUpdateTime, isAutoUpdating])
@@ -152,6 +148,8 @@ export default function LiveMinutesPanel({
   useEffect(() => {
     if (meeting?.minutes) {
       const content = meeting.minutes.content
+      console.log('[LiveMinutesPanel] Meeting minutes content:', content)
+      console.log('[LiveMinutesPanel] Meeting minutes metadata:', meeting.minutes.metadata)
       setMinutes(content)
       
       // 会議開始時刻の抽出

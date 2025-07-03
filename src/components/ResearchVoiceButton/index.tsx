@@ -5,7 +5,7 @@ import './styles.css'
 
 interface ResearchVoiceButtonProps {
   meetingId: string
-  onNewMessage: (userMessage: string, aiResponse: string) => void
+  onNewMessage: (userMessage: string, aiResponse: string, voiceTranscripts?: string[]) => void
   disabled?: boolean
 }
 
@@ -62,8 +62,16 @@ export const ResearchVoiceButton: React.FC<ResearchVoiceButtonProps> = ({
           })
 
           if (researchResponse?.success && researchResponse.response) {
-            // チャットログに追加
-            onNewMessage(voiceQuery, researchResponse.response)
+            // チャットログに追加（録音中の字幕も含める）
+            const voiceTranscripts = stopResponse.transcripts.map((t: any) => 
+              `${t.speaker}: ${t.content}`
+            )
+            onNewMessage(voiceQuery, researchResponse.response, voiceTranscripts)
+            
+            // 録音状態変更を通知
+            window.dispatchEvent(new CustomEvent('voiceRecordingStateChanged', {
+              detail: { isRecording: false }
+            }))
           } else {
             throw new Error(researchResponse?.error || 'リサーチに失敗しました')
           }
@@ -93,6 +101,11 @@ export const ResearchVoiceButton: React.FC<ResearchVoiceButtonProps> = ({
         if (!response?.success) {
           throw new Error(response?.error || '音声記録の開始に失敗しました')
         }
+        
+        // 録音状態変更を通知
+        window.dispatchEvent(new CustomEvent('voiceRecordingStateChanged', {
+          detail: { isRecording: true }
+        }))
       } catch (error: any) {
         logger.error('Failed to start voice recording:', error)
         alert(error.message || '音声記録の開始に失敗しました')
@@ -110,34 +123,28 @@ export const ResearchVoiceButton: React.FC<ResearchVoiceButtonProps> = ({
 
   return (
     <div className="research-voice-button-container">
+      {isRecording && (
+        <div className="recording-hint">
+          質問を話してください
+        </div>
+      )}
       <button
         onClick={handleToggleRecording}
         disabled={disabled || isProcessing}
         className={`research-voice-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''} ${disabled ? 'disabled' : ''}`}
-        title={isRecording ? '音声記録を停止' : '音声でリサーチ'}
+        title={isRecording ? '録音を停止してリサーチ実行' : '音声でリサーチ'}
       >
         {isProcessing ? (
-          <>
-            <span className="spinner"></span>
-            <span>処理中...</span>
-          </>
+          <span className="spinner"></span>
         ) : isRecording ? (
-          <>
-            <span className="recording-indicator">⏺</span>
-            <span>録音中 {formatDuration(recordingDuration)}</span>
-            <span className="stop-text">（停止）</span>
-          </>
+          <span className="stop-icon">⏹</span>
         ) : (
-          <>
-            <span className="icon">🎤</span>
-            <span>音声でリサーチ</span>
-          </>
+          <span className="icon">🎙️</span>
         )}
       </button>
-      
       {isRecording && (
-        <div className="recording-hint">
-          質問内容を話してください。停止ボタンを押すとリサーチを実行します。
+        <div className="recording-duration">
+          {formatDuration(recordingDuration)}
         </div>
       )}
     </div>

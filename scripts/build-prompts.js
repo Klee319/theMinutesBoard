@@ -18,6 +18,18 @@ const promptFiles = [
   {
     input: 'system-prompts/nextsteps-generation.md',
     outputName: 'NEXTSTEPS_GENERATION_PROMPT'
+  },
+  {
+    input: 'system-prompts/live-minutes-generation.md',
+    outputName: 'LIVE_MINUTES_GENERATION_PROMPT'
+  },
+  {
+    input: 'system-prompts/history-minutes-generation.md',
+    outputName: 'HISTORY_MINUTES_GENERATION_PROMPT'
+  },
+  {
+    input: 'system-prompts/research-assistant.md',
+    outputName: 'RESEARCH_ASSISTANT_PROMPT'
   }
 ];
 

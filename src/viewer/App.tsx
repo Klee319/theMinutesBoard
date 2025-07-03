@@ -62,6 +62,39 @@ function App() {
           setIsRecording(false)
           loadData()
           break
+        case 'CALL_ENDED':
+          // 会議終了時の処理
+          logger.debug('Call ended, reloading data')
+          setIsRecording(false)
+          setIsMinutesGenerating(false)
+          
+          // ライブモードの場合は履歴タブに切り替え
+          if (isLiveMode) {
+            setIsLiveMode(false)
+            setCurrentTab('history')
+            setCurrentMeeting(null)
+          }
+          
+          loadData()
+          break
+        case 'HISTORY_MINUTES_GENERATED':
+          // 履歴議事録生成完了時の処理
+          logger.debug('History minutes generated, reloading data')
+          loadData()
+          
+          // 通知を表示（オプション）
+          const meetingId = message.payload?.meetingId
+          if (meetingId) {
+            // 該当の会議を選択状態にする
+            chrome.storage.local.get(['meetings'], (result) => {
+              const meetings = result.meetings || []
+              const meeting = meetings.find((m: Meeting) => m.id === meetingId)
+              if (meeting && !isLiveMode) {
+                setSelectedMeeting(meeting)
+              }
+            })
+          }
+          break
       }
     }
     
@@ -163,7 +196,10 @@ function App() {
     setIsMinutesGenerating(true)
     
     ChromeErrorHandler.sendMessage({
-      type: 'GENERATE_MINUTES'
+      type: 'GENERATE_MINUTES',
+      payload: {
+        promptType: 'live' // ライブ表示用のプロンプトを使用
+      }
     })
       .then(response => {
         if (!response?.success) {
@@ -289,7 +325,7 @@ function App() {
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
-                  ネクストステップ
+                  ToDo
                 </button>
               </div>
             </div>
@@ -430,7 +466,7 @@ function App() {
         {/* 履歴タブ */}
         {!isLiveMode && currentTab === 'history' && (
           <div className="flex gap-4 h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
-            {/* 履歴サイドバー */}
+            {/* 履歴サイドバー - 終了した会議のみ表示 */}
             <ResizablePanel
               position="left"
               defaultWidth={280}
@@ -441,16 +477,17 @@ function App() {
               <div className="bg-white rounded-lg shadow-sm p-4 h-full overflow-y-auto">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">会議履歴</h2>
                 <div className="space-y-2">
-                  {allMeetings.length === 0 ? (
+                  {allMeetings.filter(m => m.endTime).length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">
-                      まだ会議の記録がありません
+                      まだ終了した会議の記録がありません
                     </p>
                   ) : (
                     <>
                       <p className="text-xs text-gray-600 mb-2">
-                        {allMeetings.length}件の会議があります
+                        {allMeetings.filter(m => m.endTime).length}件の会議があります
                       </p>
                       {allMeetings
+                        .filter(m => m.endTime) // 終了した会議のみ表示
                         .sort((a, b) => {
                           try {
                             return b.title.localeCompare(a.title)

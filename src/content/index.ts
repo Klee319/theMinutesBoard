@@ -49,9 +49,21 @@ class TranscriptCapture {
     window.addEventListener('beforeunload', () => {
       ServiceWorkerKeepAlive.stop()
     })
+    
+    // 定期的にコンテキストの有効性をチェック
+    setInterval(async () => {
+      const isValid = await ChromeErrorHandler.checkContextValidity()
+      if (!isValid) {
+        logger.warn('Context validity check failed - showing reconnection UI')
+        this.showReconnectionNotification()
+      }
+    }, 30000) // 30秒ごとにチェック
   }
   
   private showReconnectionNotification() {
+    // 既に通知が表示されている場合は何もしない
+    if (document.querySelector('.minutes-notification.error')) return
+    
     const notification = document.createElement('div')
     notification.className = 'minutes-notification error'
     notification.innerHTML = `

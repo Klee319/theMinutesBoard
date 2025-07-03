@@ -1,6 +1,7 @@
 import { BaseAIService } from './base'
 import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
 import { AI_MODELS } from '../../constants/ai-models'
+import { TRANSCRIPT_CONSTANTS, API_CONSTANTS } from '../../constants'
 
 export class ClaudeService extends BaseAIService {
   private baseURL = 'https://api.anthropic.com/v1'
@@ -8,13 +9,13 @@ export class ClaudeService extends BaseAIService {
   async generateMinutes(
     transcripts: Transcript[], 
     settings: UserSettings,
-    meetingInfo?: { startTime?: Date; endTime?: Date }
+    meetingInfo?: { startTime?: Date; endTime?: Date },
+    promptType: 'live' | 'history' | 'default' = 'default'
   ): Promise<Minutes> {
     // 字幕が多すぎる場合は圧縮する
-    const MAX_TRANSCRIPTS_FOR_MINUTES = 500 // 最大500件の字幕に制限
-    const processedTranscripts = this.compressTranscripts(transcripts, MAX_TRANSCRIPTS_FOR_MINUTES)
+    const processedTranscripts = this.compressTranscripts(transcripts, TRANSCRIPT_CONSTANTS.MAX_TRANSCRIPTS_FOR_MINUTES)
     
-    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo)
+    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo, promptType)
     
     // デバッグ: 送信するプロンプトの内容を確認
     console.log('[CLAUDE DEBUG] Transcripts count:', processedTranscripts.length)
@@ -32,7 +33,7 @@ export class ClaudeService extends BaseAIService {
         },
         body: JSON.stringify({
           model: settings.selectedModel || AI_MODELS.CLAUDE.SONNET,
-          max_tokens: 4000,
+          max_tokens: API_CONSTANTS.MAX_TOKENS.MINUTES_GENERATION,
           messages: [
             {
               role: 'user',
@@ -47,7 +48,20 @@ export class ClaudeService extends BaseAIService {
       }
 
       const data = await response.json()
-      const content = data.content[0]?.text || ''
+      const rawContent = data.content[0]?.text || ''
+      
+      // ライブ表示の場合はJSONレスポンスをマークダウンに変換
+      let content = rawContent
+      if (promptType === 'live') {
+        try {
+          const liveData = JSON.parse(rawContent)
+          content = this.convertLiveDataToMarkdown(liveData)
+        } catch (error) {
+          console.error('Failed to parse live minutes JSON:', error)
+          // パースに失敗した場合は元のコンテンツを使用
+          content = rawContent
+        }
+      }
       
       const minutes: Minutes = {
         id: `minutes_${Date.now()}`,
@@ -58,7 +72,8 @@ export class ClaudeService extends BaseAIService {
         metadata: {
           totalDuration: this.calculateDuration(transcripts),
           participantCount: this.getUniqueParticipants(transcripts).length,
-          wordCount: content.split(/\s+/).length
+          wordCount: content.split(/\s+/).length,
+          promptType // メタデータにプロンプトタイプを保存
         }
       }
       
@@ -144,6 +159,10 @@ export class ClaudeService extends BaseAIService {
   ): Promise<NextStep[]> {
     const prompt = this.buildNextStepsPrompt(meeting, userPrompt, userName)
     
+    // デバッグ: プロンプトの一部をログ出力
+    console.log('[CLAUDE DEBUG] NextSteps prompt first 500 chars:', prompt.substring(0, 500))
+    console.log('[CLAUDE DEBUG] NextSteps prompt contains MEETING_DATE?:', prompt.includes('MEETING_DATE'))
+    
     try {
       const response = await fetch(`${this.baseURL}/messages`, {
         method: 'POST',
@@ -170,6 +189,9 @@ export class ClaudeService extends BaseAIService {
 
       const data = await response.json()
       const content = data.content[0]?.text || ''
+      
+      // デバッグ: AIの応答をログ出力
+      console.log('[CLAUDE DEBUG] NextSteps AI response first 500 chars:', content.substring(0, 500))
       
       return this.parseNextStepsResponse(content, meeting.id)
     } catch (error) {
@@ -274,5 +296,63 @@ export class ClaudeService extends BaseAIService {
       console.error('Failed to generate text with Claude:', error)
       throw new Error('テキストの生成に失敗しました')
     }
+  }
+
+  // ライブ議事録のJSONデータをマークダウン形式に変換
+  private convertLiveDataToMarkdown(liveData: any): string {
+    const lines: string[] = []
+    
+    // ヘッダー
+    lines.push(`# 会議議事録 - ${liveData.metadata?.meetingDate || new Date().toISOString().split('T')[0]}`)
+    lines.push('')
+    lines.push('## 会議情報')
+    lines.push(`- **最終更新**: ${liveData.metadata?.lastUpdate || new Date().toLocaleString('ja-JP')}`)
+    lines.push('')
+    lines.push('---')
+    lines.push('')
+    
+    // 現在の議題（ライブダイジェスト風）
+    if (liveData.currentTopic) {
+      const topic = liveData.currentTopic
+      lines.push('## ライブダイジェスト')
+      lines.push(`### 要約: ${topic.summary}`)
+      
+      // 重要なポイントを箇条書きで
+      if (topic.keyPoints && topic.keyPoints.length > 0) {
+        topic.keyPoints.forEach((point: any) => {
+          lines.push(`- [${point.timestamp}] **${point.speaker}**: ${point.content}`)
+        })
+      }
+      
+      lines.push('')
+      lines.push('---')
+      lines.push('')
+    }
+    
+    // 過去の議題
+    if (liveData.previousTopics && liveData.previousTopics.length > 0) {
+      liveData.previousTopics.forEach((topic: any, index: number) => {
+        lines.push(`## [${topic.startTime}] ${topic.title} ▼`)
+        lines.push('')
+        lines.push(`### 要約: ${topic.summary}`)
+        
+        if (topic.keyPoints && topic.keyPoints.length > 0) {
+          lines.push('')
+          lines.push('### 発言')
+          topic.keyPoints.forEach((point: any) => {
+            lines.push(`- **${point.speaker}**: 「${point.content}」`)
+          })
+        }
+        
+        lines.push('')
+        lines.push('---')
+        lines.push('')
+      })
+    }
+    
+    // フッター
+    lines.push(`*最終更新: ${liveData.metadata?.lastUpdate || new Date().toLocaleString('ja-JP')}*`)
+    
+    return lines.join('\n')
   }
 }

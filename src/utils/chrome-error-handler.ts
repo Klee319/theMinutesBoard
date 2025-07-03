@@ -54,6 +54,13 @@ export class ChromeErrorHandler {
   ): Promise<T> {
     const { maxRetries = 3, retryDelay = 1000 } = options
     
+    // 最初にランタイムが利用可能か確認
+    if (!chrome.runtime?.id) {
+      this.isContextInvalidated = true
+      this.notifyContextInvalidated()
+      throw new Error('Extension context is not available')
+    }
+    
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         // 既にコンテキストが無効と分かっている場合は即座にエラー
@@ -62,6 +69,12 @@ export class ChromeErrorHandler {
         }
         
         return await new Promise<T>((resolve, reject) => {
+          // ランタイムIDを再度確認
+          if (!chrome.runtime?.id) {
+            reject(new Error('Extension context invalidated'))
+            return
+          }
+          
           chrome.runtime.sendMessage(message, (response) => {
             const error = this.checkLastError()
             if (error) {

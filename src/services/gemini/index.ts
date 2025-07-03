@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
 import { BaseAIService } from '../ai/base'
+import { TRANSCRIPT_CONSTANTS, STORAGE_CONSTANTS, API_CONSTANTS } from '../../constants'
 
 export class GeminiService extends BaseAIService {
   private genAI: GoogleGenerativeAI | null = null
@@ -24,7 +25,8 @@ export class GeminiService extends BaseAIService {
   async generateMinutes(
     transcripts: Transcript[], 
     settings: UserSettings,
-    meetingInfo?: { startTime?: Date; endTime?: Date }
+    meetingInfo?: { startTime?: Date; endTime?: Date },
+    promptType: 'live' | 'history' | 'default' = 'default'
   ): Promise<Minutes> {
     const modelId = settings.selectedModel || 'gemini-1.5-flash'
     
@@ -37,11 +39,10 @@ export class GeminiService extends BaseAIService {
     }
     
     // 字幕が多すぎる場合は圧縮する
-    const MAX_TRANSCRIPTS_FOR_MINUTES = 500 // 最大500件の字幕に制限
-    const processedTranscripts = this.compressTranscripts(transcripts, MAX_TRANSCRIPTS_FOR_MINUTES)
+    const processedTranscripts = this.compressTranscripts(transcripts, TRANSCRIPT_CONSTANTS.MAX_TRANSCRIPTS_FOR_MINUTES)
     
     // プロンプトファイルを優先的に使用した改善されたプロンプト
-    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo)
+    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo, promptType)
     
     // リトライとタイムアウト付きで実行
     return await this.callWithRetry(async () => {
@@ -88,7 +89,7 @@ export class GeminiService extends BaseAIService {
   }> {
     return {
       remaining: 15,
-      reset: new Date(Date.now() + 60000),
+      reset: new Date(Date.now() + STORAGE_CONSTANTS.CLEANUP_INTERVAL),
       limit: 15
     }
   }

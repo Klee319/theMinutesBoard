@@ -1,6 +1,7 @@
 import { BaseAIService } from './base'
 import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
 import { MODEL_LIMITS, DEFAULT_MODEL_LIMIT } from '../../constants/ai-models'
+import { API_CONSTANTS, TEMPERATURE_SETTINGS, STORAGE_CONSTANTS } from '../../constants'
 
 export class OpenRouterService extends BaseAIService {
   private baseURL = 'https://openrouter.ai/api/v1'
@@ -8,7 +9,8 @@ export class OpenRouterService extends BaseAIService {
   async generateMinutes(
     transcripts: Transcript[], 
     settings: UserSettings,
-    meetingInfo?: { startTime?: Date; endTime?: Date }
+    meetingInfo?: { startTime?: Date; endTime?: Date },
+    promptType: 'live' | 'history' | 'default' = 'default'
   ): Promise<Minutes> {
     // 字幕の量を動的に調整
     let processedTranscripts = transcripts
@@ -59,7 +61,7 @@ export class OpenRouterService extends BaseAIService {
       processedTranscripts = includedTranscripts
     }
     
-    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo)
+    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo, promptType)
     
     try {
       // リクエストボディを事前に作成してサイズを確認
@@ -146,7 +148,7 @@ export class OpenRouterService extends BaseAIService {
         const data = await response.json()
         return {
           remaining: data.usage?.requests_remaining || 1000,
-          reset: new Date(Date.now() + 60000),
+          reset: new Date(Date.now() + STORAGE_CONSTANTS.CLEANUP_INTERVAL),
           limit: data.usage?.requests_limit || 1000
         }
       }
@@ -179,8 +181,8 @@ export class OpenRouterService extends BaseAIService {
               content: prompt
             }
           ],
-          max_tokens: 2000,
-          temperature: 0.7
+          max_tokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
+          temperature: TEMPERATURE_SETTINGS.CREATIVE
         })
       })
 
@@ -227,8 +229,8 @@ export class OpenRouterService extends BaseAIService {
               content: prompt
             }
           ],
-          max_tokens: 2000,
-          temperature: 0.7
+          max_tokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
+          temperature: TEMPERATURE_SETTINGS.CREATIVE
         })
       })
 

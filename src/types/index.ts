@@ -182,6 +182,7 @@ export interface NextStep {
   notes: string
   createdAt: Date
   updatedAt: Date
+  source?: 'user' | 'ai' // タスクの出所（ユーザー指示 or AI提案）
 }
 
 // 共有状態を表す型

@@ -7,14 +7,14 @@
 .research-voice-button {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: #10b981;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: #ffffff;
+  color: #6b7280;
+  border: 2px solid #e5e7eb;
+  border-radius: 50%;
+  font-size: 20px;
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
@@ -22,57 +22,68 @@
 }
 
 .research-voice-button:hover:not(.disabled):not(.processing) {
-  background: #059669;
+  background: #f9fafb;
+  border-color: #d1d5db;
 }
 
 .research-voice-button.recording {
   background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+  animation: recording-pulse 1.5s ease-in-out infinite;
 }
 
 .research-voice-button.recording:hover {
   background: #dc2626;
+  border-color: #dc2626;
 }
 
 .research-voice-button.processing {
-  background: #6b7280;
+  background: #f3f4f6;
+  color: #9ca3af;
+  border-color: #e5e7eb;
   cursor: not-allowed;
 }
 
 .research-voice-button.disabled {
-  background: #e5e7eb;
-  color: #9ca3af;
+  background: #f9fafb;
+  color: #d1d5db;
+  border-color: #f3f4f6;
   cursor: not-allowed;
 }
 
 .research-voice-button .icon {
-  font-size: 16px;
+  font-size: 24px;
 }
 
 .research-voice-button .recording-indicator {
-  font-size: 12px;
-  animation: pulse 1.5s ease-in-out infinite;
+  font-size: 28px;
+  display: block;
 }
 
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
+@keyframes recording-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
   }
-  50% {
-    opacity: 0.5;
+  70% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
   }
 }
 
-.research-voice-button .stop-text {
-  font-size: 12px;
-  opacity: 0.8;
+.research-voice-button .stop-icon {
+  font-size: 20px;
+  display: block;
 }
 
 .research-voice-button .spinner {
   display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(156, 163, 175, 0.3);
+  border-top-color: #6b7280;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -83,11 +94,28 @@
   }
 }
 
+.recording-duration {
+  position: absolute;
+  bottom: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: #ef4444;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .recording-hint {
+  position: absolute;
+  top: -32px;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 12px;
   color: #6b7280;
   padding: 4px 8px;
-  background: #fef3c7;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 4px;
-  text-align: center;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }

@@ -1,6 +1,7 @@
 import { BaseAIService } from './base'
 import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
 import { AI_MODELS } from '../../constants/ai-models'
+import { TRANSCRIPT_CONSTANTS, API_CONSTANTS, TEMPERATURE_SETTINGS, STORAGE_CONSTANTS } from '../../constants'
 
 export class OpenAIService extends BaseAIService {
   private baseURL = 'https://api.openai.com/v1'
@@ -8,13 +9,13 @@ export class OpenAIService extends BaseAIService {
   async generateMinutes(
     transcripts: Transcript[], 
     settings: UserSettings,
-    meetingInfo?: { startTime?: Date; endTime?: Date }
+    meetingInfo?: { startTime?: Date; endTime?: Date },
+    promptType: 'live' | 'history' | 'default' = 'default'
   ): Promise<Minutes> {
     // 字幕が多すぎる場合は圧縮する
-    const MAX_TRANSCRIPTS_FOR_MINUTES = 500 // 最大500件の字幕に制限
-    const processedTranscripts = this.compressTranscripts(transcripts, MAX_TRANSCRIPTS_FOR_MINUTES)
+    const processedTranscripts = this.compressTranscripts(transcripts, TRANSCRIPT_CONSTANTS.MAX_TRANSCRIPTS_FOR_MINUTES)
     
-    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo)
+    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo, promptType)
     
     try {
       const response = await fetch(`${this.baseURL}/chat/completions`, {
@@ -31,8 +32,8 @@ export class OpenAIService extends BaseAIService {
               content: enhancedPrompt
             }
           ],
-          max_tokens: 4000,
-          temperature: 0.7
+          max_tokens: API_CONSTANTS.MAX_TOKENS.MINUTES_GENERATION,
+          temperature: TEMPERATURE_SETTINGS.CREATIVE
         })
       })
 
@@ -79,7 +80,7 @@ export class OpenAIService extends BaseAIService {
   async checkRateLimit(): Promise<{ remaining: number; reset: Date; limit: number }> {
     return {
       remaining: 1000,
-      reset: new Date(Date.now() + 60000),
+      reset: new Date(Date.now() + STORAGE_CONSTANTS.CLEANUP_INTERVAL),
       limit: 1000
     }
   }
@@ -100,8 +101,8 @@ export class OpenAIService extends BaseAIService {
               content: prompt
             }
           ],
-          max_tokens: 2000,
-          temperature: 0.7
+          max_tokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
+          temperature: TEMPERATURE_SETTINGS.CREATIVE
         })
       })
 
@@ -165,8 +166,8 @@ export class OpenAIService extends BaseAIService {
         body: JSON.stringify({
           model: AI_MODELS.OPENAI.GPT4O_MINI,
           messages,
-          max_tokens: 1000,
-          temperature: 0.7
+          max_tokens: API_CONSTANTS.MAX_TOKENS.CHAT_MESSAGE,
+          temperature: TEMPERATURE_SETTINGS.CREATIVE
         })
       })
 
@@ -198,8 +199,8 @@ export class OpenAIService extends BaseAIService {
               content: prompt
             }
           ],
-          max_tokens: options?.maxTokens || 2000,
-          temperature: options?.temperature ?? 0.7
+          max_tokens: options?.maxTokens || API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
+          temperature: options?.temperature ?? TEMPERATURE_SETTINGS.CREATIVE
         })
       })
 
@@ -233,8 +234,8 @@ export class OpenAIService extends BaseAIService {
               content: prompt
             }
           ],
-          max_tokens: 2000,
-          temperature: 0.3
+          max_tokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
+          temperature: TEMPERATURE_SETTINGS.PRECISE
         })
       })
 

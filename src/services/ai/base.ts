@@ -1,12 +1,13 @@
 import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
-import { MINUTES_GENERATION_PROMPT, NEXTSTEPS_GENERATION_PROMPT } from '@/system-prompts'
+import { MINUTES_GENERATION_PROMPT, NEXTSTEPS_GENERATION_PROMPT, LIVE_MINUTES_GENERATION_PROMPT, HISTORY_MINUTES_GENERATION_PROMPT } from '@/system-prompts'
 import { logger } from '@/utils/logger'
+import { TIMING_CONSTANTS, API_CONSTANTS } from '../../constants'
 
 export abstract class BaseAIService {
   protected apiKey: string
-  protected defaultTimeout = 30000 // 30秒のデフォルトタイムアウト
-  protected maxRetries = 3
-  protected retryDelay = 1000 // 初期リトライ遅延（ミリ秒）
+  protected defaultTimeout = TIMING_CONSTANTS.DEFAULT_TIMEOUT
+  protected maxRetries = API_CONSTANTS.MAX_RETRIES
+  protected retryDelay = API_CONSTANTS.RETRY_DELAY
 
   constructor(apiKey: string) {
     this.apiKey = apiKey
@@ -41,7 +42,8 @@ export abstract class BaseAIService {
   abstract generateMinutes(
     transcripts: Transcript[], 
     settings: UserSettings,
-    meetingInfo?: { startTime?: Date; endTime?: Date }
+    meetingInfo?: { startTime?: Date; endTime?: Date },
+    promptType?: 'live' | 'history' | 'default'
   ): Promise<Minutes>
 
   abstract validateApiKey(apiKey: string): Promise<boolean>
@@ -186,18 +188,26 @@ export abstract class BaseAIService {
     return result
   }
 
-  protected getSystemPrompt(): string {
-    return MINUTES_GENERATION_PROMPT
+  protected getSystemPrompt(type: 'live' | 'history' | 'default' = 'default'): string {
+    switch (type) {
+      case 'live':
+        return LIVE_MINUTES_GENERATION_PROMPT
+      case 'history':
+        return HISTORY_MINUTES_GENERATION_PROMPT
+      default:
+        return MINUTES_GENERATION_PROMPT
+    }
   }
 
   // ユーザー設定のプロンプトを取得
   protected async getEnhancedPrompt(
     settings?: UserSettings,
     transcripts?: Transcript[],
-    meetingInfo?: { startTime?: Date; endTime?: Date }
+    meetingInfo?: { startTime?: Date; endTime?: Date },
+    promptType: 'live' | 'history' | 'default' = 'default'
   ): Promise<string> {
     // システムプロンプトを必ず含める
-    let combinedPrompt = this.getSystemPrompt()
+    let combinedPrompt = this.getSystemPrompt(promptType)
     
     // デバッグログ: システムプロンプトの内容
     logger.debug(`getEnhancedPrompt: System prompt loaded (${combinedPrompt.length} chars)`)
@@ -276,11 +286,21 @@ export abstract class BaseAIService {
     const minutes = Math.floor((duration % 3600) / 60)
     const durationText = `${hours > 0 ? `${hours}時間` : ''}${minutes}分`
     
+    // デバッグ: meetingDateの値を確認
+    logger.debug(`buildNextStepsPrompt: meeting.startTime = ${meeting.startTime}`)
+    logger.debug(`buildNextStepsPrompt: meeting.startTime type = ${typeof meeting.startTime}`)
+    logger.debug(`buildNextStepsPrompt: meeting.startTime instanceof Date = ${meeting.startTime instanceof Date}`)
+    
+    // startTimeを安全にDate型に変換
+    const meetingStartTime = meeting.startTime instanceof Date 
+      ? meeting.startTime 
+      : new Date(meeting.startTime)
+    
     // テンプレート変数を準備（議事録生成と同じセット）
     const templateVariables: Record<string, any> = {
       userName: userName || '不明な参加者',
-      meetingDate: meeting.startTime,
-      startTime: meeting.startTime.toLocaleString('ja-JP'),
+      meetingDate: meetingStartTime,
+      startTime: meetingStartTime.toLocaleString('ja-JP'),
       participants: meeting.participants.join(', '),
       duration: durationText,
       transcripts: this.formatTranscriptsForNextSteps(meeting.transcripts),
@@ -290,6 +310,14 @@ export abstract class BaseAIService {
     
     // テンプレート変数を置換
     prompt = this.replaceTemplateVariables(prompt, templateVariables)
+    
+    // デバッグ: 置換後のプロンプトに含まれるmeetingDateを確認
+    const meetingDateMatch = prompt.match(/MEETING_DATE[^\n]*: ([^\n]+)/)
+    if (meetingDateMatch) {
+      logger.debug(`buildNextStepsPrompt: MEETING_DATE in prompt = ${meetingDateMatch[1]}`)
+    } else {
+      logger.warn('buildNextStepsPrompt: MEETING_DATE not found in prompt')
+    }
 
     // ユーザープロンプトの追加
     if (userPrompt && userPrompt.trim()) {
@@ -367,19 +395,27 @@ export abstract class BaseAIService {
     return parsed.nextSteps.map((item: any) => {
         let dueDate: Date | undefined
 
+        // デバッグ: AIが返したdueDateをログ出力
+        logger.debug(`parseNextStepsResponse: item.dueDate = ${item.dueDate}, task = ${item.task}`)
+
         // 期限の設定ロジック
         if (item.dueDate && item.dueDate !== 'null' && item.dueDate !== '未定') {
           try {
             dueDate = new Date(item.dueDate)
             // Invalid Date チェック
             if (isNaN(dueDate.getTime())) {
+              logger.warn(`parseNextStepsResponse: Invalid date ${item.dueDate} for task ${item.task}, using default`)
               dueDate = this.getDefaultDueDate(item.priority)
+            } else {
+              logger.debug(`parseNextStepsResponse: Parsed date ${dueDate.toISOString()} for task ${item.task}`)
             }
           } catch {
+            logger.warn(`parseNextStepsResponse: Failed to parse date ${item.dueDate} for task ${item.task}, using default`)
             dueDate = this.getDefaultDueDate(item.priority)
           }
         } else {
           // AIが期限を設定しなかった場合のフォールバック
+          logger.debug(`parseNextStepsResponse: No dueDate provided for task ${item.task}, using default`)
           dueDate = this.getDefaultDueDate(item.priority)
         }
 
@@ -395,7 +431,8 @@ export abstract class BaseAIService {
         dependencies: [],
         notes: item.notes || '',
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        source: item.source || 'user' // デフォルトはユーザー指示
       }
     })
   }
@@ -467,9 +504,23 @@ export abstract class BaseAIService {
       if (value instanceof Date) {
         // 日付の場合はISO形式（YYYY-MM-DD）に変換
         replacementValue = value.toISOString().split('T')[0]
+        logger.debug(`replaceTemplateVariables: Converting Date ${key} = ${value} -> ${replacementValue}`)
       } else if (typeof value === 'object' && value !== null) {
-        // オブジェクトの場合はJSON文字列に変換
-        replacementValue = JSON.stringify(value, null, 2)
+        // Dateオブジェクトかもしれないが、instanceof Dateでは検出されない場合の対策
+        if (value.toString && value.toString().includes('GMT')) {
+          // Date-likeオブジェクトの場合
+          const dateValue = new Date(value)
+          if (!isNaN(dateValue.getTime())) {
+            replacementValue = dateValue.toISOString().split('T')[0]
+            logger.debug(`replaceTemplateVariables: Converting Date-like object ${key} = ${value} -> ${replacementValue}`)
+          } else {
+            // オブジェクトの場合はJSON文字列に変換
+            replacementValue = JSON.stringify(value, null, 2)
+          }
+        } else {
+          // オブジェクトの場合はJSON文字列に変換
+          replacementValue = JSON.stringify(value, null, 2)
+        }
       } else if (value === undefined || value === null) {
         replacementValue = ''
       } else {

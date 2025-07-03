@@ -1,11 +1,12 @@
-import { ChromeMessage, MessageType, StorageData, Meeting, UserSettings, SharedState } from '@/types'
+import { ChromeMessage, MessageType, StorageData, Meeting, UserSettings, SharedState, Transcript } from '@/types'
 import { geminiService } from '@/services/gemini'
 import { AIServiceFactory } from '@/services/ai/factory'
 import { debugStorageInfo } from './debug'
-import { CHAT_ASSISTANT_PROMPT } from '@/system-prompts'
+import { CHAT_ASSISTANT_PROMPT, RESEARCH_ASSISTANT_PROMPT } from '@/system-prompts'
 import { logger } from '@/utils/logger'
 import { storageService } from '@/services/storage'
 import { SessionRecovery } from '@/utils/session-recovery'
+import { TRANSCRIPT_CONSTANTS, STORAGE_CONSTANTS, TIMING_CONSTANTS, API_CONSTANTS } from '../constants'
 
 let currentMeetingId: string | null = null
 let recordingTabId: number | null = null
@@ -16,8 +17,8 @@ let isMinutesGenerating = false
 // ストレージ管理用の定数
 const STORAGE_WARNING_THRESHOLD = 0.7 // 70%使用で警告
 const STORAGE_CRITICAL_THRESHOLD = 0.85 // 85%使用でクリティカル
-const MAX_TRANSCRIPTS_PER_MEETING = 1000 // 1会議あたりの最大字幕数
-const TRANSCRIPT_BATCH_SIZE = 50 // バッチ処理する字幕の数
+const MAX_TRANSCRIPTS_PER_MEETING = TRANSCRIPT_CONSTANTS.MAX_TRANSCRIPTS_PER_MEETING
+const TRANSCRIPT_BATCH_SIZE = TRANSCRIPT_CONSTANTS.MAX_BUFFER_SIZE
 
 // 共有状態
 let sharedState: SharedState = {
@@ -27,6 +28,33 @@ let sharedState: SharedState = {
   hasMinutes: false,
   recordingTabId: null,
   lastUpdate: new Date()
+}
+
+// Chrome Storageから取得したMeetingオブジェクトの日付フィールドをDate型に変換する
+function normalizeMeeting(meeting: Meeting): Meeting {
+  return {
+    ...meeting,
+    startTime: meeting.startTime instanceof Date ? meeting.startTime : new Date(meeting.startTime),
+    endTime: meeting.endTime ? (meeting.endTime instanceof Date ? meeting.endTime : new Date(meeting.endTime)) : undefined,
+    transcripts: meeting.transcripts.map(t => ({
+      ...t,
+      timestamp: t.timestamp instanceof Date ? t.timestamp : new Date(t.timestamp)
+    })),
+    minutes: meeting.minutes ? {
+      ...meeting.minutes,
+      generatedAt: meeting.minutes.generatedAt instanceof Date ? meeting.minutes.generatedAt : new Date(meeting.minutes.generatedAt),
+      editHistory: meeting.minutes.editHistory?.map(e => ({
+        ...e,
+        timestamp: e.timestamp instanceof Date ? e.timestamp : new Date(e.timestamp)
+      }))
+    } : undefined,
+    nextSteps: meeting.nextSteps?.map(ns => ({
+      ...ns,
+      dueDate: ns.dueDate ? (ns.dueDate instanceof Date ? ns.dueDate : new Date(ns.dueDate)) : undefined,
+      createdAt: ns.createdAt instanceof Date ? ns.createdAt : new Date(ns.createdAt),
+      updatedAt: ns.updatedAt instanceof Date ? ns.updatedAt : new Date(ns.updatedAt)
+    }))
+  }
 }
 
 // 状態を更新して全タブに通知する関数
@@ -266,7 +294,7 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
         return true
         
       case 'GENERATE_MINUTES':
-        handleGenerateMinutes()
+        handleGenerateMinutes(message.payload)
           .then(result => sendResponse(result))
           .catch(error => {
             logger.logError(error, 'GENERATE_MINUTES')
@@ -536,6 +564,96 @@ async function handleActualStartRecording(tabId?: number, payload?: any): Promis
   })
 }
 
+// 会議終了時刻を更新する関数
+async function updateMeetingEndTime(meetingId: string): Promise<Meeting[]> {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(['meetings'], (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message))
+        return
+      }
+      
+      const meetings: Meeting[] = result.meetings || []
+      const meetingIndex = meetings.findIndex(m => m.id === meetingId)
+      
+      if (meetingIndex !== -1) {
+        meetings[meetingIndex].endTime = new Date()
+        
+        chrome.storage.local.set({ meetings }, () => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message))
+          } else {
+            resolve(meetings)
+          }
+        })
+      } else {
+        resolve(meetings)
+      }
+    })
+  })
+}
+
+// 履歴用議事録生成の判定と実行
+async function generateHistoryMinutesIfNeeded(meeting: Meeting): Promise<void> {
+  const shouldGenerateHistoryMinutes = meeting.minutes && 
+                                     meeting.transcripts.length > 10
+  
+  if (!shouldGenerateHistoryMinutes) {
+    return
+  }
+  
+  // 一時的にcurrentMeetingIdを設定して議事録生成
+  const tempMeetingId = currentMeetingId
+  currentMeetingId = meeting.id
+  
+  try {
+    console.log('Generating history minutes for meeting:', meeting.id)
+    const result = await handleGenerateMinutes({ promptType: 'history' })
+    if (result.success) {
+      console.log('History minutes generated successfully')
+      
+      // 履歴用議事録を別フィールドに保存
+      chrome.storage.local.get(['meetings'], (storageResult) => {
+        const updatedMeetings: Meeting[] = storageResult.meetings || []
+        const updatedMeetingIndex = updatedMeetings.findIndex(m => m.id === meeting.id)
+        if (updatedMeetingIndex !== -1 && result.minutes) {
+          // 履歴用議事録をmetadataに保存
+          updatedMeetings[updatedMeetingIndex].minutes = {
+            ...result.minutes,
+            metadata: {
+              ...result.minutes.metadata,
+              isHistoryVersion: true
+            }
+          }
+          chrome.storage.local.set({ meetings: updatedMeetings })
+        }
+      })
+    } else {
+      console.error('Failed to generate history minutes:', result.error)
+    }
+  } catch (error) {
+    console.error('Error generating history minutes:', error)
+  } finally {
+    currentMeetingId = tempMeetingId
+  }
+}
+
+// 全Google Meetタブに記録停止を通知
+function notifyAllMeetTabs(meetingId: string): void {
+  chrome.tabs.query({ url: 'https://meet.google.com/*' }, (tabs) => {
+    tabs.forEach(tab => {
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'RECORDING_STOPPED',
+          payload: { meetingId }
+        }).catch(() => {
+          // エラーは無視（タブが閉じられている可能性）
+        })
+      }
+    })
+  })
+}
+
 async function handleStopRecording(): Promise<void> {
   if (!currentMeetingId) {
     console.log('No active recording to stop')
@@ -555,52 +673,34 @@ async function handleStopRecording(): Promise<void> {
     recordingTabId: null
   })
   
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get(['meetings'], (result) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message))
-        return
-      }
+  try {
+    // 会議終了時刻を更新
+    const meetings = await updateMeetingEndTime(stoppedMeetingId)
+    const meeting = meetings.find(m => m.id === stoppedMeetingId)
+    
+    if (meeting) {
+      console.log('Recording stopped:', stoppedMeetingId)
       
-      const meetings: Meeting[] = result.meetings || []
-      const meetingIndex = meetings.findIndex(m => m.id === stoppedMeetingId)
-      
-      if (meetingIndex !== -1) {
-        meetings[meetingIndex].endTime = new Date()
-        chrome.storage.local.set({ meetings }, () => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message))
-          } else {
-            console.log('Recording stopped:', stoppedMeetingId)
-            currentMeetingId = null
-            recordingTabId = null
-            chrome.storage.local.remove(['currentMeetingId'], () => {
-              // 全てのGoogle Meetタブに停止完了を通知
-              chrome.tabs.query({ url: 'https://meet.google.com/*' }, (tabs) => {
-                tabs.forEach(tab => {
-                  if (tab.id) {
-                    chrome.tabs.sendMessage(tab.id, {
-                      type: 'RECORDING_STOPPED',
-                      payload: { meetingId: stoppedMeetingId }
-                    }).catch(() => {
-                      // エラーは無視（タブが閉じられている可能性）
-                    })
-                  }
-                })
-              })
-              resolve()
-            })
-          }
-        })
-      } else {
-        currentMeetingId = null
-        recordingTabId = null
-        chrome.storage.local.remove(['currentMeetingId'], () => {
-          resolve()
-        })
-      }
-    })
-  })
+      // 履歴用議事録を生成（バックグラウンドで実行）
+      await generateHistoryMinutesIfNeeded(meeting)
+    }
+    
+    // 記録状態をクリア
+    currentMeetingId = null
+    recordingTabId = null
+    
+    // ストレージから現在の会議IDを削除
+    chrome.storage.local.remove(['currentMeetingId'])
+    
+    // 全てのGoogle Meetタブに停止完了を通知
+    notifyAllMeetTabs(stoppedMeetingId)
+  } catch (error) {
+    console.error('Error stopping recording:', error)
+    // エラーが発生しても記録状態はクリアする
+    currentMeetingId = null
+    recordingTabId = null
+    chrome.storage.local.remove(['currentMeetingId'])
+  }
 }
 
 async function handleTranscriptUpdate(transcript: any): Promise<void> {
@@ -644,8 +744,8 @@ async function handleTranscriptUpdate(transcript: any): Promise<void> {
         participants.add(transcript.speaker)
         meetings[meetingIndex].participants = Array.from(participants)
         
-        // AIアシスタントセッションにも字幕を追加
-        if (currentMeetingId && aiAssistantSessions.has(currentMeetingId)) {
+        // AIアシスタントセッションにも字幕を追加（アクティブなセッションのみ）
+        if (activeVoiceSession && activeVoiceSession.meetingId === currentMeetingId) {
           const session = aiAssistantSessions.get(currentMeetingId)
           if (session) {
             session.transcripts.push({
@@ -708,7 +808,7 @@ async function handleTranscriptUpdate(transcript: any): Promise<void> {
   })
 }
 
-async function handleGenerateMinutes(): Promise<any> {
+async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history' | 'default' }): Promise<any> {
   // 既に議事録生成中の場合は待機
   if (isMinutesGenerating) {
     return { success: false, error: '議事録を生成中です。しばらくお待ちください。' }
@@ -838,7 +938,8 @@ async function handleGenerateMinutes(): Promise<any> {
               {
                 startTime,
                 endTime
-              }
+              },
+              payload?.promptType || 'default'
             )
         
         // 生成された議事録を保存
@@ -890,6 +991,22 @@ async function handleGenerateMinutes(): Promise<any> {
                 })
               })
               
+              // ネクストステップを自動生成（初回生成時のみ）
+              if (!meetings[meetingIndex].nextSteps || meetings[meetingIndex].nextSteps.length === 0) {
+                console.log('Auto-generating next steps for meeting:', currentMeetingId)
+                handleGenerateNextSteps({ meetingId: currentMeetingId, userPrompt: '' })
+                  .then((result) => {
+                    if (result.success) {
+                      console.log('Next steps auto-generated successfully')
+                    } else {
+                      console.error('Failed to auto-generate next steps:', result.error)
+                    }
+                  })
+                  .catch((error) => {
+                    console.error('Error auto-generating next steps:', error)
+                  })
+              }
+              
               resolve({ success: true, minutes })
             }
           })
@@ -934,7 +1051,7 @@ async function handleGenerateMinutes(): Promise<any> {
         console.warn('Resetting isMinutesGenerating flag due to timeout')
         isMinutesGenerating = false
       }
-    }, 30000)
+    }, TIMING_CONSTANTS.DEFAULT_TIMEOUT)
   }
 }
 
@@ -1076,6 +1193,8 @@ async function handleCallEnded(reason: string, timestamp: string, tabId?: number
     return { success: true }
   }
   
+  const endedMeetingId = currentMeetingId
+  
   try {
     // 会議終了時刻を記録
     const meetings = await new Promise<Meeting[]>((resolve) => {
@@ -1084,7 +1203,7 @@ async function handleCallEnded(reason: string, timestamp: string, tabId?: number
       })
     })
     
-    const meetingIndex = meetings.findIndex(m => m.id === currentMeetingId)
+    const meetingIndex = meetings.findIndex(m => m.id === endedMeetingId)
     if (meetingIndex !== -1) {
       meetings[meetingIndex].endTime = new Date(timestamp)
       meetings[meetingIndex].callEndReason = reason
@@ -1097,6 +1216,20 @@ async function handleCallEnded(reason: string, timestamp: string, tabId?: number
       })
       
       console.log('Meeting end time updated:', meetings[meetingIndex])
+      
+      // 履歴用議事録を生成（非同期で実行し、完了後にviewerに通知）
+      const meeting = meetings[meetingIndex]
+      if (meeting.minutes && meeting.transcripts.length > 10) {
+        generateHistoryMinutesIfNeeded(meeting).then(() => {
+          // 履歴議事録生成完了をviewerに通知
+          chrome.runtime.sendMessage({
+            type: 'HISTORY_MINUTES_GENERATED',
+            payload: { meetingId: endedMeetingId }
+          }).catch(() => {
+            // エラーは無視（viewerが開いていない可能性）
+          })
+        })
+      }
     }
     
     // 記録状態をクリア
@@ -1117,6 +1250,17 @@ async function handleCallEnded(reason: string, timestamp: string, tabId?: number
       chrome.storage.local.remove(['currentMeetingId'], () => {
         resolve()
       })
+    })
+    
+    // 全てのMeetタブとviewerに終了を通知
+    notifyAllMeetTabs(endedMeetingId)
+    
+    // viewerに会議終了を通知
+    chrome.runtime.sendMessage({
+      type: 'CALL_ENDED',
+      payload: { meetingId: endedMeetingId, reason, timestamp }
+    }).catch(() => {
+      // エラーは無視（viewerが開いていない可能性）
     })
     
     console.log('Call end handling completed successfully')
@@ -1149,6 +1293,10 @@ async function handleGenerateNextSteps(payload: any): Promise<any> {
       return { success: false, error: 'Meeting not found' }
     }
     
+    // Meetingオブジェクトの日付フィールドを正規化
+    const normalizedMeeting = normalizeMeeting(meeting)
+    logger.debug(`handleGenerateNextSteps: normalized startTime = ${normalizedMeeting.startTime}`)
+    
     // 設定を取得
     const settings = await new Promise<UserSettings>((resolve) => {
       chrome.storage.local.get(['settings'], (result) => {
@@ -1158,7 +1306,7 @@ async function handleGenerateNextSteps(payload: any): Promise<any> {
     
     // AIサービスを使用してネクストステップを生成
     const aiService = AIServiceFactory.createService(settings)
-    const nextSteps = await aiService.generateNextSteps(meeting, userPrompt, settings.userName)
+    const nextSteps = await aiService.generateNextSteps(normalizedMeeting, userPrompt, settings.userName)
     
     // 生成されたネクストステップを会議データに追加
     meeting.nextSteps = nextSteps
@@ -1377,7 +1525,7 @@ ${meeting.minutes?.content || '（議事録がまだ生成されていません�
 `
     
     const editedContent = await aiService.generateText(editPrompt, {
-      maxTokens: 4000,
+      maxTokens: API_CONSTANTS.MAX_TOKENS.MINUTES_GENERATION,
       temperature: 0.3
     })
     
@@ -1458,82 +1606,59 @@ async function handleAiResearch(payload: { meetingId: string; question: string; 
     // AIサービスを使用してリサーチ応答を生成
     const aiService = AIServiceFactory.createService(settings)
     
-    // コンテクストの最適化: 議事録から関連部分のみを抽出
-    let relevantMinutesContent = ''
+    // AIアシスタントセッションから差分を計算
+    const session = aiAssistantSessions.get(meetingId)
+    let differenceTranscripts: Transcript[] = []
+    
+    if (session && session.type === 'research') {
+      // セッション中に記録された文字起こしのみを使用
+      differenceTranscripts = session.transcripts || []
+      logger.info(`Research mode - Using session transcripts: ${differenceTranscripts.length} transcripts recorded during session`)
+    } else {
+      // セッションがない場合は、音声入力の内容のみを使用
+      logger.warn('Research session not found, using voice input only')
+      // transcriptsパラメータは音声入力の内容なので、それをそのまま使用することはできない
+      differenceTranscripts = []
+    }
+    
+    // 現在の議題の要約を取得（議事録から）
+    let currentTopicSummary = ''
     if (meeting.minutes?.content) {
       const minutesContent = meeting.minutes.content
       
-      // 議事録のサイズをチェック（200KB制限）
-      const MAX_MINUTES_SIZE = 200 * 1024 // 200KB
-      if (minutesContent.length > MAX_MINUTES_SIZE) {
-        // 大きすぎる場合は、ライブダイジェストと最新の議題のみを抽出
-        const liveDigestMatch = minutesContent.match(/## ライブダイジェスト[\s\S]*?(?=\n---\n\n##|$)/)
-        const topicsMatches = minutesContent.match(/## \[\d{2}:\d{2}\].*?[\s\S]*?(?=\n---\n\n##|$)/g)
-        
-        relevantMinutesContent = '【議事録（要約版）】\n'
-        if (liveDigestMatch) {
-          relevantMinutesContent += liveDigestMatch[0] + '\n\n'
-        }
-        if (topicsMatches && topicsMatches.length > 0) {
-          // 最新の3つの議題のみを含める
-          const recentTopics = topicsMatches.slice(-3)
-          relevantMinutesContent += '【最近の議題】\n' + recentTopics.join('\n---\n\n')
-        }
-      } else {
-        relevantMinutesContent = minutesContent
+      // ライブダイジェストを取得（現在の議題）
+      const liveDigestMatch = minutesContent.match(/## ライブダイジェスト[\s\S]*?### 要約:([^\n]+)/)
+      if (liveDigestMatch) {
+        currentTopicSummary = `現在の議題の要約: ${liveDigestMatch[1].trim()}`
       }
-    } else {
-      relevantMinutesContent = '（議事録がまだ生成されていません）'
+      
+      // 現在の議題がない場合は、最新の議題を取得
+      if (!currentTopicSummary) {
+        const topicsMatches = minutesContent.match(/## \[\d{2}:\d{2}\]([^\n]+)[\s\S]*?### 要約:([^\n]+)/g)
+        if (topicsMatches && topicsMatches.length > 0) {
+          const latestMatch = topicsMatches[topicsMatches.length - 1].match(/## \[\d{2}:\d{2}\]([^\n]+)[\s\S]*?### 要約:([^\n]+)/)
+          if (latestMatch) {
+            currentTopicSummary = `現在の議題: ${latestMatch[1].trim()}\n要約: ${latestMatch[2].trim()}`
+          }
+        }
+      }
     }
     
-    // 関連する発言を質問に基づいて抽出（最大20件）
-    const relevantTranscripts = meeting.transcripts
-      .filter(t => {
-        const lowerContent = t.content.toLowerCase()
-        const lowerQuestion = question.toLowerCase()
-        const keywords = lowerQuestion.split(/\s+/).filter(word => word.length > 2)
-        return keywords.some(keyword => lowerContent.includes(keyword))
-      })
-      .slice(-20)
-    
-    // 関連発言がない場合は最新の発言を使用
-    const transcriptsToUse = relevantTranscripts.length > 0 
-      ? relevantTranscripts 
-      : meeting.transcripts.slice(-15)
-    
-    // リサーチプロンプトを構築
-    const researchPrompt = `
-以下の質問について、会議の内容と文脈を踏まえて詳しく回答してください。
+    // リサーチプロンプトを構築（差分の文字起こしのみを使用）
+    const researchPrompt = `${RESEARCH_ASSISTANT_PROMPT}
 
-【質問】
-${question}
+${currentTopicSummary ? `[CONTEXT: ${currentTopicSummary}]` : '[CONTEXT: 会議の議題情報は現在利用できません]'}
 
-【音声入力内容】
-${transcripts.join('\n')}
+User Query: ${question}
 
-【会議情報】
-- タイトル: ${meeting.title}
-- 参加者: ${meeting.participants.join(', ')}
-- 発言数: ${meeting.transcripts.length}件
-
-【議事録】
-${relevantMinutesContent}
-
-【関連する発言履歴】
-${transcriptsToUse.map(t => `${t.speaker}: ${t.content}`).join('\n')}
-
-【回答方針】
-1. 会議の内容に基づいて具体的に回答する
-2. 関連する発言や決定事項があれば引用する
-3. 不明な点は正直に「会議では言及されていません」と伝える
-4. 必要に応じて追加の質問や提案をする
-5. 簡潔で分かりやすい回答を心がける
-
-質問に対する回答をお願いします。
+${differenceTranscripts.length > 0 ? `【録音中の会話内容】\n${differenceTranscripts.map(t => `${t.speaker}: ${t.content}`).join('\n')}\n` : ''}
 `
     
+    // デバッグ用ログ（簡潔に）
+    logger.info(`AI Research - Query: "${question}", Context: ${currentTopicSummary ? 'Available' : 'Not available'}, Transcripts: ${differenceTranscripts.length}`)
+    
     const response = await aiService.generateText(researchPrompt, {
-      maxTokens: 2000,
+      maxTokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
       temperature: 0.7
     })
     
@@ -1715,6 +1840,8 @@ const aiAssistantSessions = new Map<string, {
   startTime: Date
   transcripts: Transcript[]
   type: 'nextsteps' | 'research'
+  // リサーチモード用：開始時の文字起こしスナップショット
+  startTranscriptSnapshot?: Transcript[]
 }>()
 
 // 古いセッションを定期的にクリーンアップ
@@ -1730,7 +1857,7 @@ setInterval(() => {
       logger.info(`Cleaned up old AI session: ${sortedSessions[i][0]}`)
     }
   }
-}, 60000) // 1分ごとにチェック
+}, STORAGE_CONSTANTS.CLEANUP_INTERVAL) // 1分ごとにチェック
 
 // 現在アクティブな音声記録セッション
 let activeVoiceSession: { meetingId: string; type: 'nextsteps' | 'research' } | null = null
@@ -1758,12 +1885,30 @@ async function handleAIAssistantStart(payload: { meetingId: string; type?: 'next
     aiAssistantSessions.delete(meetingId)
   }
   
+  // リサーチモードの場合、開始時の文字起こしスナップショットを取得
+  let startTranscriptSnapshot: Transcript[] | undefined
+  if (type === 'research') {
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const meeting = meetings.find(m => m.id === meetingId)
+    if (meeting) {
+      // 現在の文字起こしのコピーを作成
+      startTranscriptSnapshot = [...meeting.transcripts]
+      logger.info(`Research mode: Captured ${startTranscriptSnapshot.length} transcripts at start`)
+    }
+  }
+  
   // 新しいセッションを開始
   aiAssistantSessions.set(meetingId, {
     meetingId,
     startTime: new Date(),
     transcripts: [],
-    type
+    type,
+    startTranscriptSnapshot
   })
   
   // アクティブセッションを記録
@@ -1842,33 +1987,46 @@ async function handleAIAssistantProcess(payload: { meetingId: string; recordingD
       .map(t => t.content)
       .join(' ')
     
-    // プロンプトを構築
+    // 会議の文脈を最小化 - 指示に関連する部分のみを抽出
+    let relevantContext = ''
+    if (meeting.minutes) {
+      // 議事録から関連箇所を簡潔に抽出
+      const minutesContent = meeting.minutes.content
+      
+      // 現在の議題のみを抽出
+      const currentTopicMatch = minutesContent.match(/## ライブダイジェスト\n### 要約: (.+)\n([\s\S]*?)(?=\n---|\n## |$)/)
+      if (currentTopicMatch) {
+        relevantContext = `現在の議題: ${currentTopicMatch[1]}\n`
+      }
+      
+      // キーワードに基づいて関連部分を抽出
+      const keywords = instructions.toLowerCase().split(/\s+/).filter(word => word.length > 3)
+      if (keywords.length > 0) {
+        const relevantLines = minutesContent.split('\n')
+          .filter(line => keywords.some(keyword => line.toLowerCase().includes(keyword)))
+          .slice(0, 5) // 最大5行まで
+        
+        if (relevantLines.length > 0) {
+          relevantContext += '\n関連する議事録の内容:\n' + relevantLines.join('\n')
+        }
+      }
+    }
+    
+    // プロンプトを構築（会議文脈を最小化）
     const prompt = `
-以下の音声指示に基づいて、ネクストステップの編集やリサーチを実行してください。
+以下の音声指示に基づいて、質問に答えるかリサーチを実行してください。
 
 【音声指示内容】
 ${instructions}
 
-【現在のネクストステップ】
-${meeting.nextSteps?.map(ns => `- ${ns.task} (担当: ${ns.assignee || '未定'}, 期限: ${ns.dueDate ? new Date(ns.dueDate).toLocaleDateString('ja-JP') : '未定'})`).join('\n') || 'なし'}
-
-【実行内容】
-1. 指示に従ってネクストステップを編集する場合：
-   - 新しいタスクの追加
-   - 既存タスクの修正
-   - 担当者や期限の更新
-   - タスクの削除
-
-2. リサーチや調査を求められた場合：
-   - 会議内容から関連情報を抽出
-   - 質問に対する回答を提供
+${relevantContext ? `【関連する会議情報】\n${relevantContext}\n` : ''}
 
 【回答形式】
-実行した内容と結果を簡潔に説明してください。
+質問に対して簡潔に回答してください。必要な場合のみ会議の文脈を参照してください。
 `
     
     const response = await aiService.generateText(prompt, {
-      maxTokens: 2000,
+      maxTokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
       temperature: 0.7
     })
     
@@ -1947,7 +2105,7 @@ ${meeting.nextSteps?.map(ns => `- ${ns.task} (担当: ${ns.assignee || '未定'}
 `
     
     const updatedNextStepsJson = await aiService.generateText(prompt, {
-      maxTokens: 2000,
+      maxTokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
       temperature: 0.3
     })
     
@@ -1959,7 +2117,7 @@ ${meeting.nextSteps?.map(ns => `- ${ns.task} (担当: ${ns.assignee || '未定'}
       // JSONパースエラーの場合は、AIに再度生成を依頼
       const retryPrompt = `${prompt}\n\n重要: 必ず有効なJSON形式で返してください。`
       const retryJson = await aiService.generateText(retryPrompt, {
-        maxTokens: 2000,
+        maxTokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
         temperature: 0.3
       })
       updatedNextSteps = JSON.parse(retryJson)
@@ -1988,8 +2146,8 @@ handleTranscriptUpdate = async function(payload: any): Promise<void> {
   // 元の処理を実行
   await originalHandleTranscriptUpdate(payload)
   
-  // AIアシスタントセッションがある場合は字幕を記録
-  if (currentMeetingId) {
+  // AIアシスタントセッションがある場合は字幕を記録（アクティブなセッションのみ）
+  if (activeVoiceSession && activeVoiceSession.meetingId === currentMeetingId) {
     const session = aiAssistantSessions.get(currentMeetingId)
     if (session && payload?.transcript) {
       session.transcripts.push({
