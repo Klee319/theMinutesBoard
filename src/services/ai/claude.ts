@@ -1,5 +1,6 @@
 import { BaseAIService } from './base'
 import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
+import { AI_MODELS } from '../../constants/ai-models'
 
 export class ClaudeService extends BaseAIService {
   private baseURL = 'https://api.anthropic.com/v1'
@@ -9,7 +10,17 @@ export class ClaudeService extends BaseAIService {
     settings: UserSettings,
     meetingInfo?: { startTime?: Date; endTime?: Date }
   ): Promise<Minutes> {
-    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings, meetingInfo)
+    // 字幕が多すぎる場合は圧縮する
+    const MAX_TRANSCRIPTS_FOR_MINUTES = 500 // 最大500件の字幕に制限
+    const processedTranscripts = this.compressTranscripts(transcripts, MAX_TRANSCRIPTS_FOR_MINUTES)
+    
+    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo)
+    
+    // デバッグ: 送信するプロンプトの内容を確認
+    console.log('[CLAUDE DEBUG] Transcripts count:', processedTranscripts.length)
+    console.log('[CLAUDE DEBUG] Enhanced prompt length:', enhancedPrompt.length)
+    console.log('[CLAUDE DEBUG] Prompt contains {{transcripts}}?:', enhancedPrompt.includes('{{transcripts}}'))
+    console.log('[CLAUDE DEBUG] Prompt first 1000 chars:', enhancedPrompt.substring(0, 1000))
     
     try {
       const response = await fetch(`${this.baseURL}/messages`, {
@@ -20,7 +31,7 @@ export class ClaudeService extends BaseAIService {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: settings.selectedModel || 'claude-3-5-sonnet-20241022',
+          model: settings.selectedModel || AI_MODELS.CLAUDE.SONNET,
           max_tokens: 4000,
           messages: [
             {
@@ -68,7 +79,7 @@ export class ClaudeService extends BaseAIService {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-5-haiku-20241022',
+          model: AI_MODELS.CLAUDE.HAIKU,
           max_tokens: 10,
           messages: [
             {
@@ -102,7 +113,7 @@ export class ClaudeService extends BaseAIService {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-5-haiku-20241022',
+          model: AI_MODELS.CLAUDE.HAIKU,
           max_tokens: 2000,
           messages: [
             {
@@ -125,26 +136,6 @@ export class ClaudeService extends BaseAIService {
     }
   }
 
-  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings, meetingInfo?: { startTime?: Date; endTime?: Date }): Promise<string> {
-    const formattedTranscript = this.formatTranscriptsEnhanced(transcripts, meetingInfo?.startTime, meetingInfo?.endTime)
-    const basePrompt = await this.getEnhancedPrompt(settings, transcripts, meetingInfo)
-    
-    return `${basePrompt}
-
-**会議の詳細情報:**
-- 参加者: ${this.getUniqueParticipants(transcripts).join(', ')}
-- 発言数: ${transcripts.length}件
-- 会議時間: ${Math.floor(this.calculateDuration(transcripts) / 60)}分
-
-**会議の文字起こし:**
-${formattedTranscript}
-
-**出力フォーマット指示:**
-- 必ずMarkdown形式で出力してください
-- 話者名は正確に記録してください
-- 重要な決定事項は**太字**で強調してください
-- アクションアイテムがある場合は明確にリストアップしてください`
-  }
 
   async generateNextSteps(
     meeting: Meeting,
@@ -162,7 +153,7 @@ ${formattedTranscript}
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-5-haiku-20241022',
+          model: AI_MODELS.CLAUDE.HAIKU,
           max_tokens: 2000,
           messages: [
             {
@@ -233,7 +224,7 @@ ${formattedTranscript}
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-5-haiku-20241022',
+          model: AI_MODELS.CLAUDE.HAIKU,
           max_tokens: 1000,
           messages
         })
@@ -261,7 +252,7 @@ ${formattedTranscript}
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-3-5-haiku-20241022',
+          model: AI_MODELS.CLAUDE.HAIKU,
           max_tokens: options?.maxTokens || 2000,
           temperature: options?.temperature,
           messages: [

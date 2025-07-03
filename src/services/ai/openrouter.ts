@@ -1,5 +1,6 @@
 import { BaseAIService } from './base'
 import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
+import { MODEL_LIMITS, DEFAULT_MODEL_LIMIT } from '../../constants/ai-models'
 
 export class OpenRouterService extends BaseAIService {
   private baseURL = 'https://openrouter.ai/api/v1'
@@ -9,9 +10,73 @@ export class OpenRouterService extends BaseAIService {
     settings: UserSettings,
     meetingInfo?: { startTime?: Date; endTime?: Date }
   ): Promise<Minutes> {
-    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings, meetingInfo)
+    // 字幕の量を動的に調整
+    let processedTranscripts = transcripts
+    
+    // プロンプトテンプレートのトークン数を概算（約5000トークン）
+    const basePromptTokens = 5000
+    
+    // 出力用のトークンを確保（4000トークン）
+    const outputTokens = 4000
+    
+    const selectedModel = settings.selectedModel || 'anthropic/claude-3.5-sonnet'
+    const maxContextTokens = MODEL_LIMITS[selectedModel as keyof typeof MODEL_LIMITS] || DEFAULT_MODEL_LIMIT
+    
+    // 安全なマージンを含めた利用可能トークン数
+    const availableTokensForTranscripts = Math.floor((maxContextTokens - basePromptTokens - outputTokens) * 0.8)
+    
+    // 現在のトランスクリプトのトークン数を計算
+    let totalTokens = 0
+    let includedTranscripts: Transcript[] = []
+    
+    // 最新の発言から順に追加
+    for (let i = transcripts.length - 1; i >= 0; i--) {
+      const transcript = transcripts[i]
+      const transcriptTokens = this.estimateTokens(`${transcript.speaker}: ${transcript.content}`)
+      
+      if (totalTokens + transcriptTokens > availableTokensForTranscripts) {
+        break
+      }
+      
+      includedTranscripts.unshift(transcript)
+      totalTokens += transcriptTokens
+    }
+    
+    // 省略された発言がある場合
+    if (includedTranscripts.length < transcripts.length) {
+      const omittedCount = transcripts.length - includedTranscripts.length
+      console.warn(`Too many transcripts for model ${selectedModel} (${transcripts.length} total, ${includedTranscripts.length} included, estimated ${totalTokens} tokens)`)
+      
+      const dummyTranscript: Transcript = {
+        id: 'omitted',
+        meetingId: transcripts[0].meetingId,
+        speaker: 'System',
+        content: `[※ ${omittedCount}件の古い発言が省略されました]`,
+        timestamp: includedTranscripts[0].timestamp
+      }
+      processedTranscripts = [dummyTranscript, ...includedTranscripts]
+    } else {
+      processedTranscripts = includedTranscripts
+    }
+    
+    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo)
     
     try {
+      // リクエストボディを事前に作成してサイズを確認
+      const requestBody = {
+        model: settings.selectedModel || 'anthropic/claude-3.5-sonnet',
+        messages: [
+          {
+            role: 'user',
+            content: enhancedPrompt
+          }
+        ],
+        max_tokens: 4000,
+        temperature: 0.7
+      }
+      
+      const requestBodyStr = JSON.stringify(requestBody)
+      
       const response = await fetch(`${this.baseURL}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -20,17 +85,7 @@ export class OpenRouterService extends BaseAIService {
           'HTTP-Referer': 'https://localhost:3000/',
           'X-Title': 'theMinutesBoard'
         },
-        body: JSON.stringify({
-          model: settings.selectedModel || 'anthropic/claude-3.5-sonnet',
-          messages: [
-            {
-              role: 'user',
-              content: enhancedPrompt
-            }
-          ],
-          max_tokens: 4000,
-          temperature: 0.7
-        })
+        body: requestBodyStr
       })
 
       if (!response.ok) {
@@ -147,26 +202,6 @@ export class OpenRouterService extends BaseAIService {
     }
   }
 
-  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings, meetingInfo?: { startTime?: Date; endTime?: Date }): Promise<string> {
-    const formattedTranscript = this.formatTranscriptsEnhanced(transcripts, meetingInfo?.startTime, meetingInfo?.endTime)
-    const basePrompt = await this.getEnhancedPrompt(settings, transcripts, meetingInfo)
-    
-    return `${basePrompt}
-
-**会議の詳細情報:**
-- 参加者: ${this.getUniqueParticipants(transcripts).join(', ')}
-- 発言数: ${transcripts.length}件
-- 会議時間: ${Math.floor(this.calculateDuration(transcripts) / 60)}分
-
-**会議の文字起こし:**
-${formattedTranscript}
-
-**出力フォーマット指示:**
-- 必ずMarkdown形式で出力してください
-- 話者名は正確に記録してください
-- 重要な決定事項は**太字**で強調してください
-- アクションアイテムがある場合は明確にリストアップしてください`
-  }
 
   async generateNextSteps(
     meeting: Meeting,

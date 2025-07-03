@@ -11,6 +11,32 @@ export abstract class BaseAIService {
   constructor(apiKey: string) {
     this.apiKey = apiKey
   }
+  
+  protected compressTranscripts(
+    transcripts: Transcript[], 
+    maxCount: number = 500
+  ): Transcript[] {
+    if (transcripts.length <= maxCount) return transcripts;
+    
+    const processedTranscripts = transcripts.slice(-maxCount);
+    const omittedCount = transcripts.length - maxCount;
+    const dummyTranscript: Transcript = {
+      id: 'omitted',
+      meetingId: transcripts[0].meetingId,
+      speaker: 'System',
+      content: `[※ ${omittedCount}件の古い発言が省略されました]`,
+      timestamp: processedTranscripts[0].timestamp
+    };
+    
+    return [dummyTranscript, ...processedTranscripts];
+  }
+  
+  // トークン数を概算（日本語は1文字約0.5トークン、英語は1単語約1トークン）
+  protected estimateTokens(text: string): number {
+    const japaneseChars = (text.match(/[\u4e00-\u9faf\u3040-\u309f\u30a0-\u30ff]/g) || []).length
+    const englishWords = (text.match(/[a-zA-Z]+/g) || []).length
+    return Math.ceil(japaneseChars * 0.5 + englishWords)
+  }
 
   abstract generateMinutes(
     transcripts: Transcript[], 
@@ -69,6 +95,20 @@ export abstract class BaseAIService {
   }
 
   protected formatTranscriptsEnhanced(transcripts: Transcript[], startTime?: Date, endTime?: Date): string {
+    // デバッグログ: 入力トランスクリプトの情報
+    logger.debug(`formatTranscriptsEnhanced: Processing ${transcripts.length} transcripts`)
+    
+    // フォーマット前にサイズを確認
+    if (transcripts.length > 1000) {
+      console.warn(`formatTranscriptsEnhanced: Large number of transcripts (${transcripts.length})`);
+    }
+    
+    // デバッグログ: 最初と最後のトランスクリプトの内容を確認
+    if (transcripts.length > 0) {
+      logger.debug(`formatTranscriptsEnhanced: First transcript - Speaker: ${transcripts[0].speaker}, Content: ${transcripts[0].content.substring(0, 50)}...`)
+      logger.debug(`formatTranscriptsEnhanced: Last transcript - Speaker: ${transcripts[transcripts.length - 1].speaker}, Content: ${transcripts[transcripts.length - 1].content.substring(0, 50)}...`)
+    }
+    
     const sortedTranscripts = transcripts.sort((a, b) => {
       const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime()
       const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime()
@@ -102,6 +142,9 @@ export abstract class BaseAIService {
       consolidatedTranscripts.push(currentTranscript)
     }
     
+    // デバッグログ: 統合処理の結果
+    logger.debug(`formatTranscriptsEnhanced: Consolidated ${sortedTranscripts.length} transcripts into ${consolidatedTranscripts.length} entries`)
+    
     // 会議の時間情報を追加
     let header = ''
     if (startTime || endTime) {
@@ -132,8 +175,15 @@ export abstract class BaseAIService {
         return `[${time}] **${t.speaker}**: ${t.content}`
       })
       .join('\n\n')
-      
-    return header + transcriptText
+    
+    const result = header + transcriptText
+    
+    // 結果のサイズを確認
+    if (result.length > 200000) { // 200KB以上の場合警告
+      console.warn(`formatTranscriptsEnhanced: Very large formatted output (${(result.length / 1024).toFixed(1)}KB)`);
+    }
+    
+    return result
   }
 
   protected getSystemPrompt(): string {
@@ -149,6 +199,13 @@ export abstract class BaseAIService {
     // システムプロンプトを必ず含める
     let combinedPrompt = this.getSystemPrompt()
     
+    // デバッグログ: システムプロンプトの内容
+    logger.debug(`getEnhancedPrompt: System prompt loaded (${combinedPrompt.length} chars)`)
+    logger.debug(`getEnhancedPrompt: System prompt preview: ${combinedPrompt.substring(0, 200)}...`)
+    
+    // プロンプトの最大サイズを制限（約200KB - より安全なマージン）
+    const MAX_PROMPT_SIZE = 200000
+    
     // 会議時間の計算
     const duration = transcripts ? this.calculateDuration(transcripts) : 0
     const hours = Math.floor(duration / 3600)
@@ -159,19 +216,44 @@ export abstract class BaseAIService {
     const participants = transcripts ? this.getUniqueParticipants(transcripts) : []
     
     // テンプレート変数を準備（両プロンプト共通）
+    const formattedTranscripts = transcripts ? this.formatTranscriptsEnhanced(transcripts, meetingInfo?.startTime, meetingInfo?.endTime) : ''
+    
+    // デバッグログ: フォーマット済みトランスクリプトの情報
+    logger.debug(`getEnhancedPrompt: Formatted transcripts length: ${formattedTranscripts.length} chars`)
+    if (transcripts) {
+      logger.debug(`getEnhancedPrompt: Original transcripts count: ${transcripts.length}`)
+    }
+    
     const templateVariables: Record<string, any> = {
       userName: settings?.userName || '不明な参加者',
       meetingDate: meetingInfo?.startTime || new Date(),
       startTime: meetingInfo?.startTime ? meetingInfo.startTime.toLocaleString('ja-JP') : new Date().toLocaleString('ja-JP'),
       participants: participants.join(', '),
       duration: durationText,
-      transcripts: transcripts ? this.formatTranscriptsEnhanced(transcripts, meetingInfo?.startTime, meetingInfo?.endTime) : '',
+      transcripts: formattedTranscripts,
       speakerMap: transcripts ? this.buildSpeakerMap(transcripts) : {},
       currentTime: new Date().toLocaleString('ja-JP'),
     }
     
+    // デバッグログ: テンプレート変数の内容（transcriptsフィールドは長さのみ）
+    const debugVariables = { ...templateVariables }
+    debugVariables.transcripts = `[${formattedTranscripts.length} chars]`
+    logger.debug('getEnhancedPrompt: Template variables:', debugVariables)
+    
     // テンプレート変数を置換
+    const beforeReplaceLength = combinedPrompt.length
     combinedPrompt = this.replaceTemplateVariables(combinedPrompt, templateVariables)
+    
+    // デバッグログ: 置換処理後の結果
+    logger.debug(`getEnhancedPrompt: After template replacement - length changed from ${beforeReplaceLength} to ${combinedPrompt.length} chars`)
+    logger.debug(`getEnhancedPrompt: Combined prompt preview after replacement: ${combinedPrompt.substring(0, 300)}...`)
+    
+    // プロンプトサイズを制限
+    if (combinedPrompt.length > MAX_PROMPT_SIZE) {
+      console.warn(`Prompt too large (${(combinedPrompt.length / 1024).toFixed(1)}KB), truncating...`)
+      // 末尾をカットして省略マーカーを追加
+      combinedPrompt = combinedPrompt.substring(0, MAX_PROMPT_SIZE - 100) + '\n\n[... 以下省略されました ...]'
+    }
     
     // カスタムプロンプトがある場合は追加
     if (settings?.promptTemplate && settings.promptTemplate.trim()) {
@@ -370,9 +452,15 @@ export abstract class BaseAIService {
   ): string {
     let result = template
     
+    // デバッグログ: 置換前のテンプレート内の変数を検出
+    const variableMatches = template.match(/\{\{[^}]+\}\}/g) || []
+    logger.debug(`replaceTemplateVariables: Found ${variableMatches.length} template variables to replace`)
+    logger.debug(`replaceTemplateVariables: Template variables found: ${variableMatches.join(', ')}`)
+    
     // 各変数を置換
     Object.entries(variables).forEach(([key, value]) => {
       const regex = new RegExp(`\{\{${key}\}\}`, 'g')
+      const matches = result.match(regex) || []
       
       // 値の型に応じて適切に変換
       let replacementValue: string
@@ -388,8 +476,24 @@ export abstract class BaseAIService {
         replacementValue = String(value)
       }
       
+      if (matches.length > 0) {
+        // デバッグログ: 実際に置換される変数
+        const previewValue = key === 'transcripts' 
+          ? `[${replacementValue.length} chars]` 
+          : replacementValue.length > 100 
+            ? replacementValue.substring(0, 100) + '...' 
+            : replacementValue
+        logger.debug(`replaceTemplateVariables: Replacing ${matches.length} occurrences of {{${key}}} with: ${previewValue}`)
+      }
+      
       result = result.replace(regex, replacementValue)
     })
+    
+    // デバッグログ: 置換後に残っている変数をチェック
+    const remainingVariables = result.match(/\{\{[^}]+\}\}/g) || []
+    if (remainingVariables.length > 0) {
+      logger.warn(`replaceTemplateVariables: ${remainingVariables.length} template variables remain unreplaced: ${remainingVariables.join(', ')}`)
+    }
     
     return result
   }

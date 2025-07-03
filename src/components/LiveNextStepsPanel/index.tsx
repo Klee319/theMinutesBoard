@@ -3,7 +3,6 @@ import { Meeting, NextStep } from '@/types'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 import { formatDate } from '@/utils/dateFormatter'
-import { AIAssistantButton } from '@/components/AIAssistantButton'
 
 interface LiveNextStepsPanelProps {
   meeting: Meeting | null
@@ -189,12 +188,6 @@ export default function LiveNextStepsPanel({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {meeting && (
-            <AIAssistantButton 
-              meetingId={meeting.id} 
-              className="mr-2"
-            />
-          )}
           {nextSteps.length === 0 && meeting?.minutes && (
             <button
               onClick={handleGenerate}

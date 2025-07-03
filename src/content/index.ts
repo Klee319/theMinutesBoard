@@ -2,6 +2,7 @@ import { ChromeMessage } from '@/types'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler, ServiceWorkerKeepAlive } from '@/utils/chrome-error-handler'
 import { formatMarkdownToHTML } from '@/utils/markdown'
+import { CAPTION_SELECTORS, CAPTION_BUTTON_SELECTORS, SPEAKER_SELECTORS, LEAVE_BUTTON_SELECTORS, LEAVE_CONFIRM_SELECTORS } from '@/constants/selectors'
 import './styles.css'
 
 class TranscriptCapture {
@@ -516,26 +517,33 @@ class TranscriptCapture {
   }
   
   private checkForCaptions() {
-    const captionSelectors = [
-      // 2024年の新しいセレクタ
-      '[jsname="YSg9Nc"]',
-      '[jscontroller="GCpkte"]',
-      '[data-use-drivesdk-live-captions]',
-      // 既存のセレクタ
-      '[jsname="dsyhDe"]',
-      '[jsname="tgaKEf"]',
-      '.a4cQT',
-      '[role="region"][aria-live="polite"]',
-      '.TBMuR.bj4p3b',
-      '.iOzk7[jsname="tgaKEf"]',
-      // 追加の一般的なセレクタ
-      '[aria-live="polite"][role="region"]',
-      '.a4cQT[jsname="YPqjbf"]',
-      '[jsname="YPqjbf"]',
-      '[data-is-speakable="true"]'
-    ]
+    const captionSelectors = CAPTION_SELECTORS
     
     logger.debug('Checking for captions with selectors:', captionSelectors)
+    
+    // ページ内のすべての字幕関連要素を探す（デバッグ用）
+    const debugSelectors = [
+      '[aria-label*="字幕"]',
+      '[aria-label*="caption"]',
+      '[class*="caption"]',
+      '.a4cQT',
+      '.iOzk7'
+    ]
+    
+    debugSelectors.forEach(selector => {
+      const elements = document.querySelectorAll(selector)
+      if (elements.length > 0) {
+        logger.info(`[CAPTION DEBUG] Found elements with selector "${selector}":`, elements.length)
+        elements.forEach((el, index) => {
+          if (index < 3) {  // 最初の3つだけログ
+            logger.info(`[CAPTION DEBUG] Element ${index}:`, {
+              className: (el as HTMLElement).className,
+              innerHTML: (el as HTMLElement).innerHTML?.substring(0, 200)
+            })
+          }
+        })
+      }
+    })
     
     for (const selector of captionSelectors) {
       const element = document.querySelector(selector)
@@ -644,8 +652,11 @@ class TranscriptCapture {
           return
         }
         
+        logger.info(`[CAPTION DEBUG] MutationObserver fired, ${mutations.length} mutations`)
+        
         mutations.forEach((mutation) => {
           if (mutation.type === 'childList') {
+            logger.info('[CAPTION DEBUG] childList mutation detected, calling processCaptions')
             this.processCaptions()
           }
         })
@@ -1158,6 +1169,8 @@ class TranscriptCapture {
       return
     }
     
+    logger.info('[CAPTION DEBUG] processCaptions called, captionsContainer:', this.captionsContainer)
+    
     if (!this.captionsContainer) {
       logger.debug('processCaptions called but no captionsContainer')
       return
@@ -1168,6 +1181,10 @@ class TranscriptCapture {
     
     // Google Meetの字幕要素の包括的なセレクタパターン
     const captionSelectors = [
+      // 最新のGoogle Meet字幕構造（2024年12月）
+      '.nMcdL.bj4p3b',  // 字幕の内容を含むdiv
+      '.ZPyPXe',        // 字幕の親要素
+      '[role="region"][aria-label="字幕"]',  // aria-labelによる検索
       // 新しいGoogle Meetの字幕セレクタ（2024年更新）
       '[data-use-drivesdk-live-captions]',
       '[jsname="YSg9Nc"]',
@@ -1223,11 +1240,16 @@ class TranscriptCapture {
       return
     }
     
+    logger.info(`[CAPTION DEBUG] Found ${captionElements.length} caption elements`)
+    
     captionElements.forEach((element, index) => {
         logger.debug(`Processing caption element ${index}:`, element)
+      logger.info(`[CAPTION DEBUG] Full element text: "${element.textContent?.trim()}"`)
+      logger.info(`[CAPTION DEBUG] Element innerHTML:`, element.innerHTML)
       
       // より詳細なスピーカーとテキストの検出パターン
       const speakerPatterns = [
+        '.NWpY1d',           // 最新のGoogle Meet話者名セレクタ
         '[jsname="r5DJGb"]',
         '[jsname="BHMnZ"]', // 新しいパターン
         '.zs7s8d',
@@ -1239,6 +1261,8 @@ class TranscriptCapture {
       ]
       
       const textPatterns = [
+        '.ygicle.VbkSUe',  // 最新のGoogle Meet字幕テキストセレクタ
+        '.ygicle',         // フォールバック
         '[jsname="XcTWac"]',
         '[jsname="K4r5Ff"]', // 新しいパターン
         '.zs7s8d',
@@ -1266,6 +1290,8 @@ class TranscriptCapture {
         textElement = element.querySelector(pattern)
         if (textElement && textElement.textContent?.trim()) {
           logger.debug(`Found text with pattern ${pattern}:`, textElement.textContent)
+          logger.info(`[CAPTION DEBUG] textElement HTML:`, textElement.innerHTML)
+          logger.info(`[CAPTION DEBUG] textElement parent HTML:`, textElement.parentElement?.innerHTML)
           break
         }
       }
@@ -1382,7 +1408,7 @@ class TranscriptCapture {
           content: cleanText
         })
         
-        logger.debug(`[${speaker}]: ${cleanText}`)
+        logger.info(`[CAPTION DEBUG] Captured: [${speaker}]: ${cleanText}`)
       }
     })
   }
@@ -1536,9 +1562,11 @@ class TranscriptCapture {
   // トランスクリプトバッファに追加
   private addToTranscriptBuffer(transcript: { speaker: string; content: string }) {
     this.transcriptBuffer.push(transcript)
+    logger.info(`[CAPTION DEBUG] Added to buffer. Buffer size: ${this.transcriptBuffer.length}`)
     
     // バッファサイズが上限に達したら即座にフラッシュ
     if (this.transcriptBuffer.length >= this.maxBufferSize) {
+      logger.info('[CAPTION DEBUG] Buffer full, flushing...')
       this.flushTranscriptBuffer()
     }
   }
@@ -1546,6 +1574,8 @@ class TranscriptCapture {
   // バッファをフラッシュ
   private flushTranscriptBuffer() {
     if (this.transcriptBuffer.length === 0) return
+    
+    logger.info(`[CAPTION DEBUG] Flushing ${this.transcriptBuffer.length} transcripts to background`)
     
     const transcriptsToSend = [...this.transcriptBuffer]
     this.transcriptBuffer = [] // バッファをクリア
@@ -1680,27 +1710,9 @@ class TranscriptCapture {
   }
   
   private highlightCaptionButton() {
-    // 字幕ボタンのセレクタ
-    const captionButtonSelectors = [
-      '[aria-label*="字幕"]',
-      '[aria-label*="キャプション"]',
-      '[aria-label*="Captions"]',
-      '[aria-label*="Turn on captions"]',
-      '[aria-label*="Turn off captions"]',
-      '[jsname="r8qRAd"]',
-      '[data-tooltip*="字幕"]',
-      '[data-tooltip*="caption"]',
-      'button[data-is-muted="false"][aria-label*="CC"]',
-      'button[aria-label*="CC"]',
-      // 新しいセレクタ
-      '[data-tooltip-id*="caption"]',
-      '[data-promo-anchor-id*="caption"]',
-      'button[data-mdc-dialog-action="TURN_ON_CAPTIONS"]'
-    ]
-    
     logger.debug('Looking for caption button...')
     
-    for (const selector of captionButtonSelectors) {
+    for (const selector of CAPTION_BUTTON_SELECTORS) {
       const button = document.querySelector(selector)
       if (button) {
         const htmlButton = button as HTMLElement

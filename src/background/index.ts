@@ -604,10 +604,14 @@ async function handleStopRecording(): Promise<void> {
 }
 
 async function handleTranscriptUpdate(transcript: any): Promise<void> {
+  console.log('[TRANSCRIPT DEBUG] Received transcript:', transcript)
+  
   if (!currentMeetingId) {
-    console.log('No active recording for transcript update')
+    console.log('[TRANSCRIPT DEBUG] No active recording (currentMeetingId is null)')
     return
   }
+  
+  console.log('[TRANSCRIPT DEBUG] Current meeting ID:', currentMeetingId)
   
   return new Promise(async (resolve, reject) => {
     chrome.storage.local.get(['meetings'], async (result) => {
@@ -767,10 +771,26 @@ async function handleGenerateMinutes(): Promise<any> {
             return
           }
           
+          // デバッグ: 文字起こしデータの内容を確認
+          console.log('[BACKGROUND DEBUG] Meeting ID:', currentMeetingId)
+          console.log('[BACKGROUND DEBUG] Transcripts count:', currentMeeting.transcripts.length)
+          if (currentMeeting.transcripts.length > 0) {
+            console.log('[BACKGROUND DEBUG] First transcript:', currentMeeting.transcripts[0])
+            console.log('[BACKGROUND DEBUG] Last transcript:', currentMeeting.transcripts[currentMeeting.transcripts.length - 1])
+          }
+          
           if (currentMeeting.transcripts.length === 0) {
             isMinutesGenerating = false
             resolve({ success: false, error: 'まだ発言が記録されていません' })
             return
+          }
+          
+          // 字幕が異常に多い場合のみ警告
+          if (currentMeeting.transcripts.length > 1000) {
+            console.warn('Large number of transcripts:', {
+              count: currentMeeting.transcripts.length,
+              totalCharacters: currentMeeting.transcripts.reduce((sum, t) => sum + (t.content || '').length, 0)
+            })
           }
           
           if (!mergedSettings || Object.keys(mergedSettings).length === 0) {
@@ -807,6 +827,9 @@ async function handleGenerateMinutes(): Promise<any> {
             
             const startTime = normalizeDate(currentMeeting.startTime)
             const endTime = normalizeDate(currentMeeting.endTime)
+            
+            // AIサービス呼び出しログ（重要な情報のみ）
+            console.log(`Generating minutes: ${currentMeeting.transcripts.length} transcripts, provider: ${mergedSettings.aiProvider || 'default'}`)
             
             // 議事録を生成（会議の時刻情報を含める）
             const minutes = await aiService.generateMinutes(
@@ -1435,6 +1458,49 @@ async function handleAiResearch(payload: { meetingId: string; question: string; 
     // AIサービスを使用してリサーチ応答を生成
     const aiService = AIServiceFactory.createService(settings)
     
+    // コンテクストの最適化: 議事録から関連部分のみを抽出
+    let relevantMinutesContent = ''
+    if (meeting.minutes?.content) {
+      const minutesContent = meeting.minutes.content
+      
+      // 議事録のサイズをチェック（200KB制限）
+      const MAX_MINUTES_SIZE = 200 * 1024 // 200KB
+      if (minutesContent.length > MAX_MINUTES_SIZE) {
+        // 大きすぎる場合は、ライブダイジェストと最新の議題のみを抽出
+        const liveDigestMatch = minutesContent.match(/## ライブダイジェスト[\s\S]*?(?=\n---\n\n##|$)/)
+        const topicsMatches = minutesContent.match(/## \[\d{2}:\d{2}\].*?[\s\S]*?(?=\n---\n\n##|$)/g)
+        
+        relevantMinutesContent = '【議事録（要約版）】\n'
+        if (liveDigestMatch) {
+          relevantMinutesContent += liveDigestMatch[0] + '\n\n'
+        }
+        if (topicsMatches && topicsMatches.length > 0) {
+          // 最新の3つの議題のみを含める
+          const recentTopics = topicsMatches.slice(-3)
+          relevantMinutesContent += '【最近の議題】\n' + recentTopics.join('\n---\n\n')
+        }
+      } else {
+        relevantMinutesContent = minutesContent
+      }
+    } else {
+      relevantMinutesContent = '（議事録がまだ生成されていません）'
+    }
+    
+    // 関連する発言を質問に基づいて抽出（最大20件）
+    const relevantTranscripts = meeting.transcripts
+      .filter(t => {
+        const lowerContent = t.content.toLowerCase()
+        const lowerQuestion = question.toLowerCase()
+        const keywords = lowerQuestion.split(/\s+/).filter(word => word.length > 2)
+        return keywords.some(keyword => lowerContent.includes(keyword))
+      })
+      .slice(-20)
+    
+    // 関連発言がない場合は最新の発言を使用
+    const transcriptsToUse = relevantTranscripts.length > 0 
+      ? relevantTranscripts 
+      : meeting.transcripts.slice(-15)
+    
     // リサーチプロンプトを構築
     const researchPrompt = `
 以下の質問について、会議の内容と文脈を踏まえて詳しく回答してください。
@@ -1451,10 +1517,10 @@ ${transcripts.join('\n')}
 - 発言数: ${meeting.transcripts.length}件
 
 【議事録】
-${meeting.minutes?.content || '（議事録がまだ生成されていません）'}
+${relevantMinutesContent}
 
-【最近の発言履歴】
-${meeting.transcripts.slice(-10).map(t => `${t.speaker}: ${t.content}`).join('\n')}
+【関連する発言履歴】
+${transcriptsToUse.map(t => `${t.speaker}: ${t.content}`).join('\n')}
 
 【回答方針】
 1. 会議の内容に基づいて具体的に回答する

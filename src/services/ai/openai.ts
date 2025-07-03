@@ -1,5 +1,6 @@
 import { BaseAIService } from './base'
 import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
+import { AI_MODELS } from '../../constants/ai-models'
 
 export class OpenAIService extends BaseAIService {
   private baseURL = 'https://api.openai.com/v1'
@@ -9,7 +10,11 @@ export class OpenAIService extends BaseAIService {
     settings: UserSettings,
     meetingInfo?: { startTime?: Date; endTime?: Date }
   ): Promise<Minutes> {
-    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings, meetingInfo)
+    // 字幕が多すぎる場合は圧縮する
+    const MAX_TRANSCRIPTS_FOR_MINUTES = 500 // 最大500件の字幕に制限
+    const processedTranscripts = this.compressTranscripts(transcripts, MAX_TRANSCRIPTS_FOR_MINUTES)
+    
+    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo)
     
     try {
       const response = await fetch(`${this.baseURL}/chat/completions`, {
@@ -88,7 +93,7 @@ export class OpenAIService extends BaseAIService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: AI_MODELS.OPENAI.GPT4O_MINI,
           messages: [
             {
               role: 'user',
@@ -112,26 +117,6 @@ export class OpenAIService extends BaseAIService {
     }
   }
 
-  private async createEnhancedPrompt(transcripts: Transcript[], settings: UserSettings, meetingInfo?: { startTime?: Date; endTime?: Date }): Promise<string> {
-    const formattedTranscript = this.formatTranscriptsEnhanced(transcripts, meetingInfo?.startTime, meetingInfo?.endTime)
-    const basePrompt = await this.getEnhancedPrompt(settings, transcripts, meetingInfo)
-    
-    return `${basePrompt}
-
-**会議の詳細情報:**
-- 参加者: ${this.getUniqueParticipants(transcripts).join(', ')}
-- 発言数: ${transcripts.length}件
-- 会議時間: ${Math.floor(this.calculateDuration(transcripts) / 60)}分
-
-**会議の文字起こし:**
-${formattedTranscript}
-
-**出力フォーマット指示:**
-- 必ずMarkdown形式で出力してください
-- 話者名は正確に記録してください
-- 重要な決定事項は**太字**で強調してください
-- アクションアイテムがある場合は明確にリストアップしてください`
-  }
 
   async sendChatMessage(
     message: string,
@@ -178,7 +163,7 @@ ${formattedTranscript}
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: AI_MODELS.OPENAI.GPT4O_MINI,
           messages,
           max_tokens: 1000,
           temperature: 0.7
@@ -206,7 +191,7 @@ ${formattedTranscript}
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: AI_MODELS.OPENAI.GPT4O_MINI,
           messages: [
             {
               role: 'user',
@@ -241,7 +226,7 @@ ${formattedTranscript}
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: AI_MODELS.OPENAI.GPT4O_MINI,
           messages: [
             {
               role: 'user',

@@ -25,7 +25,9 @@
       "Bash(rg:*)",
       "Bash(zip:*)",
       "Bash(tar:*)",
-      "Bash(gh:*)"
+      "Bash(gh:*)",
+      "Bash(gemini:*)",
+      "Bash(env)"
     ],
     "deny": []
   },

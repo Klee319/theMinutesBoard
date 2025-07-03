@@ -36,8 +36,12 @@ export class GeminiService extends BaseAIService {
       throw new Error('Gemini API key not configured')
     }
     
+    // 字幕が多すぎる場合は圧縮する
+    const MAX_TRANSCRIPTS_FOR_MINUTES = 500 // 最大500件の字幕に制限
+    const processedTranscripts = this.compressTranscripts(transcripts, MAX_TRANSCRIPTS_FOR_MINUTES)
+    
     // プロンプトファイルを優先的に使用した改善されたプロンプト
-    const enhancedPrompt = await this.createEnhancedPrompt(transcripts, settings, meetingInfo)
+    const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo)
     
     // リトライとタイムアウト付きで実行
     return await this.callWithRetry(async () => {
@@ -101,47 +105,6 @@ export class GeminiService extends BaseAIService {
     }, 'generateContent')
   }
   
-  private formatTranscripts(transcripts: Transcript[]): string {
-    return transcripts
-      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-      .map(t => `[${new Date(t.timestamp).toLocaleTimeString()}] ${t.speaker}: ${t.content}`)
-      .join('\n')
-  }
-
-  private async createEnhancedPrompt(
-    transcripts: Transcript[], 
-    settings: UserSettings,
-    meetingInfo?: { startTime?: Date; endTime?: Date }
-  ): Promise<string> {
-    const analysis = this.analyzeTranscriptQuality(transcripts)
-    const formattedTranscript = super.formatTranscriptsEnhanced(
-      transcripts, 
-      meetingInfo?.startTime, 
-      meetingInfo?.endTime
-    )
-    
-    // プロンプトファイルを優先的に使用（設定のプロンプトテンプレートより優先）
-    const basePrompt = await this.getEnhancedPrompt(settings, transcripts, meetingInfo)
-    
-    return `${basePrompt}
-
-**会議の詳細情報:**
-- 参加者: ${this.getUniqueParticipants(transcripts).join(', ')}
-- 発言数: ${transcripts.length}件
-- 文字起こし品質: ${analysis.quality}
-
-**注意事項:**
-${analysis.issues.length > 0 ? analysis.issues.map(issue => `- ${issue}`).join('\n') : '- 特に問題なし'}
-
-**会議の文字起こし:**
-${formattedTranscript}
-
-**出力フォーマット指示:**
-- 必ずMarkdown形式で出力してください
-- 話者名は正確に記録してください
-- 重要な決定事項は**太字**で強調してください
-- アクションアイテムがある場合は明確にリストアップしてください`
-  }
 
   private analyzeTranscriptQuality(transcripts: Transcript[]): {
     quality: string
