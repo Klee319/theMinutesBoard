@@ -23,6 +23,8 @@ class TranscriptCapture {
   private currentParticipants: Set<string> = new Set()
   private cleanupTimeouts: Set<number> = new Set()
   private cleanupIntervals: Set<number> = new Set()
+  private captionCheckInterval: NodeJS.Timer | null = null
+  private lastCaptionCheckTime = Date.now()
   
   // メモリ管理用の変数
   private transcriptBuffer: any[] = []
@@ -387,6 +389,15 @@ class TranscriptCapture {
         case 'GET_RECORDING_STATUS':
           sendResponse({ isRecording: this.isRecording })
           break
+        
+        case 'CHECK_CAPTIONS':
+          // 字幕の状態をチェック
+          this.checkForCaptions()
+          sendResponse({ 
+            success: true, 
+            hasCaptions: !!this.captionsContainer 
+          })
+          break
           
         case 'START_RECORDING':
           // 字幕チェックを再実行
@@ -688,6 +699,9 @@ class TranscriptCapture {
     
     logger.info('Recording started')
     this.showNotification('記録を開始しました')
+    
+    // 字幕監視を開始
+    this.startCaptionMonitoring()
   }
   
   private stopRecording() {
@@ -713,6 +727,12 @@ class TranscriptCapture {
     
     // キャプションコンテナの参照をクリア
     this.captionsContainer = null
+    
+    // 字幕監視を停止
+    if (this.captionCheckInterval) {
+      clearInterval(this.captionCheckInterval)
+      this.captionCheckInterval = null
+    }
     
     // 通知を即座に表示
     this.showNotification('記録を停止しました', 'info')
@@ -778,7 +798,7 @@ class TranscriptCapture {
       }
     }
     
-    const urlCheckInterval = setInterval(debouncedCheckUrl, 2000) // 2秒ごとにチェック
+    const urlCheckInterval = setInterval(debouncedCheckUrl, 500) // 0.5秒ごとにチェック（退出をより早く検知）
     this.cleanupIntervals.add(urlCheckInterval)
     
     // popstateイベントでも監視（ブラウザの戻る/進むボタン）
@@ -791,6 +811,9 @@ class TranscriptCapture {
     window.addEventListener('beforeunload', () => {
       // ページ離脱前にクリーンアップを実行
       if (this.isRecording) {
+        // 通話終了として処理
+        this.handleCallEnded('Page unload')
+        
         this.isRecording = false
         this.updateRecordingUI(false)
         if (this.observer) {
@@ -799,8 +822,7 @@ class TranscriptCapture {
         }
       }
       clearInterval(urlCheckInterval)
-      // ページ離脱時はメッセージ送信をスキップ（コンテキストが無効になるため）
-      logger.info('Page unloading, skipping call ended message')
+      logger.info('Page unloading, call ended message sent')
     })
     
     // 通話終了ボタンの監視
@@ -1524,7 +1546,17 @@ class TranscriptCapture {
   private updateMinutesContent(minutes: any) {
     const minutesText = document.getElementById('minutes-text')
     if (minutesText) {
-      minutesText.innerHTML = formatMarkdownToHTML(minutes.content)
+      // ライブダイジェスト部分のみを抽出
+      const content = minutes.content
+      const liveDigestMatch = content.match(/## ライブダイジェスト[\s\S]*?(?=\n---\n\n## |$)/)
+      
+      if (liveDigestMatch) {
+        // ライブダイジェストのみを表示
+        minutesText.innerHTML = formatMarkdownToHTML(liveDigestMatch[0])
+      } else {
+        // ライブダイジェストが見つからない場合は全体を表示
+        minutesText.innerHTML = formatMarkdownToHTML(content)
+      }
     }
   }
   
@@ -1719,6 +1751,40 @@ class TranscriptCapture {
     }, 2000) // 2秒ごとにチェック
     
     this.cleanupIntervals.add(pollingInterval)
+  }
+  
+  private startCaptionMonitoring() {
+    // 記録中に字幕がOFFになっていないか定期的にチェック
+    if (this.captionCheckInterval) {
+      clearInterval(this.captionCheckInterval)
+    }
+    
+    this.captionCheckInterval = setInterval(() => {
+      if (!this.isRecording) {
+        if (this.captionCheckInterval) {
+          clearInterval(this.captionCheckInterval)
+          this.captionCheckInterval = null
+        }
+        return
+      }
+      
+      // 字幕コンテナの存在と表示状態をチェック
+      const captionsAvailable = this.checkForCaptions()
+      const now = Date.now()
+      
+      if (!captionsAvailable || !this.captionsContainer) {
+        // 最後のチェックから5秒以上経過している場合のみ警告
+        if (now - this.lastCaptionCheckTime > 5000) {
+          logger.warn('Captions turned off during recording')
+          this.showNotification('警告：字幕がOFFになっています。字幕をONにしないと文字起こしが記録されません。', 'error')
+          this.highlightCaptionButton()
+          this.lastCaptionCheckTime = now
+        }
+      } else {
+        // 字幕が復活した場合
+        this.lastCaptionCheckTime = now
+      }
+    }, 3000) // 3秒ごとにチェック
   }
   
   private highlightCaptionButton() {
@@ -1941,6 +2007,12 @@ class TranscriptCapture {
     // インターバルのクリア
     this.cleanupIntervals.forEach(interval => clearInterval(interval))
     this.cleanupIntervals.clear()
+    
+    // 字幕監視のクリア
+    if (this.captionCheckInterval) {
+      clearInterval(this.captionCheckInterval)
+      this.captionCheckInterval = null
+    }
     
     // メモリ解放
     this.transcriptBuffer = []

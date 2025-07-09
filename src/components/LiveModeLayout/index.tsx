@@ -25,6 +25,7 @@ function MobilePanelTabs({
   updateSource,
   onManualUpdate,
   showResearchPanel,
+  showNextStepsPanel,
   onToggleResearchPanel
 }: {
   meeting: Meeting | null
@@ -33,6 +34,7 @@ function MobilePanelTabs({
   updateSource: 'manual' | null
   onManualUpdate: () => void
   showResearchPanel: boolean
+  showNextStepsPanel: boolean
   onToggleResearchPanel: (show: boolean) => void
 }) {
   const [activeTab, setActiveTab] = useState<'minutes' | 'nextsteps' | 'research'>('minutes')
@@ -103,10 +105,10 @@ function MobilePanelTabs({
         )}
       </div>
 
-      {/* タブコンテンツ */}
+      {/* タブコンテンツ - 統一された高さ */}
       <div className="flex-1 overflow-hidden">
         {activeTab === 'minutes' && (
-          <div className="h-full bg-white rounded-lg shadow-sm">
+          <div className="h-full bg-white rounded-lg shadow-sm flex flex-col">
             <LiveMinutesPanel 
               meeting={meeting}
               isGenerating={isMinutesGenerating || (isUpdating && updateSource === 'manual')}
@@ -119,7 +121,7 @@ function MobilePanelTabs({
         )}
         
         {activeTab === 'nextsteps' && (
-          <div className="h-full bg-white rounded-lg shadow-sm">
+          <div className="h-full bg-white rounded-lg shadow-sm flex flex-col">
             <LiveNextStepsPanel 
               meeting={meeting}
               isLocked={isUpdating}
@@ -128,7 +130,7 @@ function MobilePanelTabs({
         )}
         
         {activeTab === 'research' && showResearchPanel && (
-          <div className="h-full bg-white rounded-lg shadow-sm">
+          <div className="h-full bg-white rounded-lg shadow-sm flex flex-col">
             <ResearchPanel 
               meeting={meeting}
               isLocked={isUpdating}
@@ -260,10 +262,10 @@ export default function LiveModeLayout({
   if (!meeting) {
     return (
       <div className="h-[calc(100vh-120px)] md:h-[calc(100vh-140px)] flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="text-6xl mb-4">🎙️</div>
-          <p className="text-xl text-gray-600 mb-2">記録中の会議がありません</p>
-          <p className="text-gray-500">Google Meetで記録を開始してください</p>
+        <div className="flex flex-col items-center justify-center text-center" style={{ minHeight: 'calc(100vh - 400px)' }}>
+          <div className="text-6xl mb-6">🎙️</div>
+          <p className="text-lg text-gray-600 mb-4">記録中の会議がありません</p>
+          <p className="text-base text-gray-500">Google Meetで記録を開始してください</p>
         </div>
       </div>
     )
@@ -282,14 +284,15 @@ export default function LiveModeLayout({
             onManualUpdate={handleUpdate}
             showResearchPanel={showResearchPanel}
             showNextStepsPanel={showNextStepsPanel}
+            onToggleResearchPanel={() => {}}
           />
         </div>
       ) : (
-        // デスクトップ版: パネルを横並び（列型）レイアウト
+        // デスクトップ版: パネルを横並び（列型）レイアウト - 統一された高さ
         <div className="h-full flex gap-2">
           {/* 左側: 議事録パネル */}
           <div 
-            className="bg-white rounded-lg shadow-sm overflow-hidden"
+            className="bg-white rounded-lg shadow-sm overflow-hidden h-full flex flex-col"
             style={{ 
               width: (() => {
                 try {
@@ -393,7 +396,7 @@ export default function LiveModeLayout({
           {/* 中央: ネクストステップパネル（表示時のみ） */}
           {showNextStepsPanel && (
             <div 
-              className="bg-white rounded-lg shadow-sm overflow-hidden"
+              className="bg-white rounded-lg shadow-sm overflow-hidden h-full flex flex-col"
               style={{
                 width: (() => {
                   try {
@@ -504,7 +507,7 @@ export default function LiveModeLayout({
           {/* 右側: リサーチパネル（表示時のみ） */}
           {showResearchPanel && (
               <div 
-                className="bg-white rounded-lg shadow-sm overflow-hidden"
+                className="bg-white rounded-lg shadow-sm overflow-hidden h-full flex flex-col"
                 style={{ 
                   width: (() => {
                     try {

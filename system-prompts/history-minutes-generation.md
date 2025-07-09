@@ -42,7 +42,7 @@
 # {{meetingTitle}} 議事録
 
 ## 会議概要
-- **日時**: {{meetingDate}} {{startTime}} - {{endTime}} ({{duration}})
+- **日時**: {{startTime}} - {{endTime}} ({{duration}})
 - **参加者**: {{participants}}
 - **記録者**: {{userName}}
 

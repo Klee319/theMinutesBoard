@@ -10,6 +10,7 @@ function App() {
   const [isInMeet, setIsInMeet] = useState(false)
   const [aiProvider, setAiProvider] = useState<string>('gemini')
   const [isMinutesGenerating, setIsMinutesGenerating] = useState(false)
+  const [captionError, setCaptionError] = useState(false)
   
   useEffect(() => {
     loadData()
@@ -137,13 +138,9 @@ function App() {
       try {
         const captionStatus = await ChromeErrorHandler.sendMessageToTab(tab.id, { type: 'CHECK_CAPTIONS' })
         if (!captionStatus?.hasCaptions) {
-          alert(
-            '⚠️ 字幕が有効になっていません\n\n' +
-            '記録を開始するには字幕を有効にする必要があります。\n\n' +
-            '字幕を有効にする方法：\n' +
-            '1. Google Meetの画面下部にある「CC」ボタンをクリック\n' +
-            '2. 「字幕をオンにする」を選択'
-          )
+          setCaptionError(true)
+          // エラー表示を3秒後に自動的に消す
+          setTimeout(() => setCaptionError(false), 3000)
           return
         }
       } catch (error) {
@@ -250,6 +247,22 @@ function App() {
               {aiProvider === 'claude' && 'Claude'}
               {aiProvider === 'openrouter' && 'OpenRouter'} APIキーが設定済み
             </p>
+          </div>
+        </div>
+      )}
+      
+      {captionError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+          <div className="flex items-start gap-2">
+            <span className="text-red-600 text-lg">⚠️</span>
+            <div className="flex-1">
+              <p className="text-sm text-red-800 font-medium">
+                字幕が有効になっていません
+              </p>
+              <p className="text-xs text-red-700 mt-1">
+                Google Meetの「CC」ボタンから字幕をオンにしてください
+              </p>
+            </div>
           </div>
         </div>
       )}

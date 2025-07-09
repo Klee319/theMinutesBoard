@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Meeting, NextStep } from '@/types'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
-import { formatDate } from '@/utils/dateFormatter'
+import { formatDate, formatRelativeDate } from '@/utils/dateFormatter'
 import { TIMING_CONSTANTS, STATUS_ICONS, PRIORITY_COLORS, PRIORITY_LABELS } from '@/constants'
 
 interface LiveNextStepsPanelProps {
@@ -180,9 +180,9 @@ export default function LiveNextStepsPanel({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+      <div className="flex-shrink-0 flex items-center justify-between p-4 border-b bg-gray-50">
         <div className="flex items-center gap-3">
-          <h3 className="text-md font-semibold text-gray-900">📋 ネクストステップ</h3>
+          <h3 className="text-lg font-semibold text-gray-900">📋 ネクストステップ</h3>
           {isRecording && autoUpdateInterval > 0 && nextUpdateTime && nextSteps.length > 0 && (
             <div className="flex items-center gap-2 text-xs text-gray-600">
               {isAutoUpdating ? (
@@ -263,7 +263,16 @@ export default function LiveNextStepsPanel({
                         </span>
                         <span className={`flex items-center gap-1 ${!step.dueDate ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>
                           <span>📅</span>
-                          <span>{step.dueDate ? formatDate(step.dueDate) : '期限未定'}</span>
+                          <span>{step.dueDate ? (() => {
+                            try {
+                              const formattedDate = formatDate(step.dueDate)
+                              const relativeDate = formatRelativeDate(step.dueDate)
+                              return `${formattedDate} (${relativeDate})`
+                            } catch (error) {
+                              logger.error('Error formatting date for step:', step.id, error)
+                              return '期限未定'
+                            }
+                          })() : '期限未定'}</span>
                         </span>
                         {step.notes && (
                           <span className="flex items-center gap-1 text-gray-600" title={step.notes}>
@@ -278,26 +287,26 @@ export default function LiveNextStepsPanel({
               ))}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="text-3xl mb-3">📋</div>
-              <p className="text-sm text-gray-600 mb-2">ネクストステップがありません</p>
+            <div className="flex flex-col items-center justify-center text-center flex-1">
+              <div className="text-6xl mb-6">📋</div>
+              <p className="text-lg text-gray-600 mb-4">ネクストステップがありません</p>
               {meeting.minutes ? (
-                <p className="text-xs text-gray-500">議事録更新時に自動生成されます</p>
+                <p className="text-base text-gray-500">議事録更新時に自動生成されます</p>
               ) : (
-                <p className="text-xs text-gray-500">先に議事録を生成してください</p>
+                <p className="text-base text-gray-500">先に議事録を生成してください</p>
               )}
             </div>
           )
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="text-3xl mb-3">📋</div>
-            <p className="text-sm text-gray-600">記録を開始してください</p>
+          <div className="flex flex-col items-center justify-center text-center" style={{ minHeight: 'calc(100vh - 400px)' }}>
+            <div className="text-6xl mb-6">📋</div>
+            <p className="text-lg text-gray-600">記録を開始してください</p>
           </div>
         )}
       </div>
 
       {nextSteps.length > 0 && (
-        <div className="p-3 border-t bg-gray-50 text-xs text-gray-600">
+        <div className="flex-shrink-0 p-3 border-t bg-gray-50 text-xs text-gray-600">
           <div className="flex justify-between">
             <span>未完了: {nextSteps.filter(s => s.status !== 'completed').length}</span>
             <span>完了: {nextSteps.filter(s => s.status === 'completed').length}</span>

@@ -476,7 +476,7 @@ async function handleStartRecording(tabId?: number, payload?: any): Promise<void
   
   // Content Scriptに字幕チェックを依頼
   try {
-    const response = await new Promise((resolve, reject) => {
+    const response = await new Promise<{success: boolean; error?: string}>((resolve, reject) => {
       chrome.tabs.sendMessage(tabId, { type: 'START_RECORDING', payload }, (response) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message))
@@ -608,6 +608,22 @@ async function generateHistoryMinutesIfNeeded(meeting: Meeting): Promise<void> {
   
   try {
     console.log('Generating history minutes for meeting:', meeting.id)
+    
+    // endTimeがない場合は現在時刻を設定
+    if (!meeting.endTime) {
+      try {
+        meeting.endTime = new Date()
+        // Invalid Date チェック
+        if (isNaN(meeting.endTime.getTime())) {
+          console.warn('Created invalid endTime, using epoch time')
+          meeting.endTime = new Date(Date.now())
+        }
+      } catch (error) {
+        console.error('Error creating endTime:', error)
+        meeting.endTime = new Date(Date.now())
+      }
+    }
+    
     const result = await handleGenerateMinutes({ promptType: 'history' })
     if (result.success) {
       console.log('History minutes generated successfully')
@@ -928,6 +944,12 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
             const startTime = normalizeDate(currentMeeting.startTime)
             const endTime = normalizeDate(currentMeeting.endTime)
             
+            // デバッグ: 時刻情報の確認
+            console.log(`[MINUTES DEBUG] currentMeeting.startTime: ${currentMeeting.startTime}`)
+            console.log(`[MINUTES DEBUG] currentMeeting.endTime: ${currentMeeting.endTime}`)
+            console.log(`[MINUTES DEBUG] normalized startTime: ${startTime}`)
+            console.log(`[MINUTES DEBUG] normalized endTime: ${endTime}`)
+            
             // AIサービス呼び出しログ（重要な情報のみ）
             console.log(`Generating minutes: ${currentMeeting.transcripts.length} transcripts, provider: ${mergedSettings.aiProvider || 'default'}`)
             
@@ -1228,6 +1250,10 @@ async function handleCallEnded(reason: string, timestamp: string, tabId?: number
         })
       })
       
+      // 記録を自動停止
+      console.log('Auto-stopping recording due to call end')
+      await handleStopRecording()
+      
       console.log('Meeting end time updated:', meetings[meetingIndex])
       
       // 履歴用議事録を生成（非同期で実行し、完了後にviewerに通知）
@@ -1319,10 +1345,58 @@ async function handleGenerateNextSteps(payload: any): Promise<any> {
     
     // AIサービスを使用してネクストステップを生成
     const aiService = AIServiceFactory.createService(settings)
-    const nextSteps = await aiService.generateNextSteps(normalizedMeeting, userPrompt, settings.userName)
+    const generatedNextSteps = await aiService.generateNextSteps(normalizedMeeting, userPrompt, settings.userName)
     
-    // 生成されたネクストステップを会議データに追加
-    meeting.nextSteps = nextSteps
+    // 既存のネクストステップとマージ
+    if (meeting.nextSteps && meeting.nextSteps.length > 0) {
+      // 既存のネクストステップをマップに変換（タスク内容をキーとして）
+      const existingStepsMap = new Map<string, NextStep>()
+      meeting.nextSteps.forEach(step => {
+        // タスク内容と担当者をキーとして保存
+        const key = `${step.task.toLowerCase()}_${(step.assignee || '').toLowerCase()}`
+        existingStepsMap.set(key, step)
+      })
+      
+      // 新しく生成されたネクストステップをマージ
+      const mergedSteps: NextStep[] = []
+      const usedKeys = new Set<string>()
+      
+      generatedNextSteps.forEach(newStep => {
+        const key = `${newStep.task.toLowerCase()}_${(newStep.assignee || '').toLowerCase()}`
+        const existingStep = existingStepsMap.get(key)
+        
+        if (existingStep) {
+          // 既存のステップがある場合、状態を保持しつつ更新
+          mergedSteps.push({
+            ...newStep,
+            id: existingStep.id, // IDを保持
+            status: existingStep.status || 'pending', // 状態を保持
+            createdAt: existingStep.createdAt, // 作成日時を保持
+            updatedAt: new Date(),
+            // ユーザーが編集したフィールドは保持
+            notes: existingStep.notes || newStep.notes,
+            dueDate: existingStep.dueDate || newStep.dueDate
+          })
+          usedKeys.add(key)
+        } else {
+          // 新しいステップの場合はそのまま追加
+          mergedSteps.push(newStep)
+        }
+      })
+      
+      // 完了済みの既存ステップを保持
+      existingStepsMap.forEach((step, key) => {
+        if (!usedKeys.has(key) && step.status === 'completed') {
+          mergedSteps.push(step)
+        }
+      })
+      
+      meeting.nextSteps = mergedSteps
+      logger.info(`Merged next steps: ${existingStepsMap.size} existing, ${generatedNextSteps.length} generated, ${mergedSteps.length} total`)
+    } else {
+      // 既存のネクストステップがない場合はそのまま設定
+      meeting.nextSteps = generatedNextSteps
+    }
     
     // 会議データを保存
     await new Promise<void>((resolve) => {
@@ -1335,11 +1409,11 @@ async function handleGenerateNextSteps(payload: any): Promise<any> {
     if (recordingTabId) {
       chrome.tabs.sendMessage(recordingTabId, {
         type: 'NEXTSTEPS_GENERATED',
-        payload: { meetingId, nextSteps }
+        payload: { meetingId, nextSteps: meeting.nextSteps }
       })
     }
     
-    return { success: true, nextSteps }
+    return { success: true, nextSteps: meeting.nextSteps }
   } catch (error) {
     console.error('Error generating next steps:', error)
     return { success: false, error: error.message }
@@ -1657,14 +1731,14 @@ async function handleAiResearch(payload: { meetingId: string; question: string; 
       }
     }
     
-    // リサーチプロンプトを構築（差分の文字起こしのみを使用）
+    // リサーチプロンプトを構築（音声入力中の内容のみを使用）
     const researchPrompt = `${RESEARCH_ASSISTANT_PROMPT}
 
 ${currentTopicSummary ? `[CONTEXT: ${currentTopicSummary}]` : '[CONTEXT: 会議の議題情報は現在利用できません]'}
 
 User Query: ${question}
 
-${differenceTranscripts.length > 0 ? `【録音中の会話内容】\n${differenceTranscripts.map(t => `${t.speaker}: ${t.content}`).join('\n')}\n` : ''}
+${transcripts.length > 0 ? `【音声入力中の内容】\n${transcripts.join('\n')}\n` : ''}
 `
     
     // デバッグ用ログ（簡潔に）
@@ -1853,8 +1927,6 @@ const aiAssistantSessions = new Map<string, {
   startTime: Date
   transcripts: Transcript[]
   type: 'nextsteps' | 'research'
-  // リサーチモード用：開始時の文字起こしスナップショット
-  startTranscriptSnapshot?: Transcript[]
 }>()
 
 // 古いセッションを定期的にクリーンアップ
@@ -1898,30 +1970,12 @@ async function handleAIAssistantStart(payload: { meetingId: string; type?: 'next
     aiAssistantSessions.delete(meetingId)
   }
   
-  // リサーチモードの場合、開始時の文字起こしスナップショットを取得
-  let startTranscriptSnapshot: Transcript[] | undefined
-  if (type === 'research') {
-    const meetings = await new Promise<Meeting[]>((resolve) => {
-      chrome.storage.local.get(['meetings'], (result) => {
-        resolve(result.meetings || [])
-      })
-    })
-    
-    const meeting = meetings.find(m => m.id === meetingId)
-    if (meeting) {
-      // 現在の文字起こしのコピーを作成
-      startTranscriptSnapshot = [...meeting.transcripts]
-      logger.info(`Research mode: Captured ${startTranscriptSnapshot.length} transcripts at start`)
-    }
-  }
-  
   // 新しいセッションを開始
   aiAssistantSessions.set(meetingId, {
     meetingId,
     startTime: new Date(),
     transcripts: [],
-    type,
-    startTranscriptSnapshot
+    type
   })
   
   // アクティブセッションを記録
@@ -1944,8 +1998,11 @@ async function handleAIAssistantStop(payload: { meetingId: string }): Promise<{ 
     return { success: false, error: 'No active AI Assistant session found' }
   }
   
-  // セッションを終了して記録された字幕を返す
+  // セッション中に記録された字幕のみを返す
   const transcripts = session.transcripts
+  
+  logger.info(`AI Assistant recording stopped for meeting: ${meetingId}, recorded ${transcripts.length} transcripts during session`)
+  
   aiAssistantSessions.delete(meetingId)
   
   // アクティブセッションをクリア

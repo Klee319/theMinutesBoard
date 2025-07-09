@@ -146,66 +146,73 @@ export default function LiveMinutesPanel({
   }
 
   useEffect(() => {
-    if (meeting?.minutes) {
-      const content = meeting.minutes.content
-      console.log('[LiveMinutesPanel] Meeting minutes content:', content)
-      console.log('[LiveMinutesPanel] Meeting minutes metadata:', meeting.minutes.metadata)
-      setMinutes(content)
-      
-      // 会議開始時刻の抽出
-      const startTimeMatch = content.match(/開始時刻: (\d{2}:\d{2})/)
-      if (startTimeMatch && !meetingStartTime) {
-        const [hours, minutes] = startTimeMatch[1].split(':').map(Number)
-        const startTime = new Date()
-        startTime.setHours(hours, minutes, 0, 0)
-        setMeetingStartTime(startTime)
-      }
-      
-      // ライブダイジェストの抽出
-      try {
-        const digestMatch = content.match(/## ライブダイジェスト\n### 要約: (.+)\n([\s\S]*?)\n### 発言[▼▽]/)
-        if (digestMatch) {
-          const summary = digestMatch[1]
-          const detailsSection = digestMatch[2]
-          
-          // 詳細を抽出
-          const details = detailsSection.match(/^- (.+)$/gm)?.map(line => line.substring(2)) || []
-          
-          // 発言を抽出
-          const statementsMatch = content.match(/### 発言[▼▽]\n([\s\S]*?)\n\n---/)
-          const statements: { speaker: string; content: string }[] = []
-          if (statementsMatch) {
-            const statementsText = statementsMatch[1]
-            const statementLines = statementsText.match(/^- (.+?): (.+)$/gm) || []
-            statementLines.forEach(line => {
-              const match = line.match(/^- (.+?): (.+)$/)
-              if (match) {
-                statements.push({ speaker: match[1], content: match[2] })
-              }
-            })
+    try {
+      if (meeting?.minutes) {
+        const content = meeting.minutes.content
+        logger.info('[LiveMinutesPanel] Meeting minutes content:', content)
+        logger.info('[LiveMinutesPanel] Meeting minutes metadata:', meeting.minutes.metadata)
+        setMinutes(content)
+        
+        // 会議開始時刻の抽出
+        const startTimeMatch = content.match(/開始時刻: (\d{2}:\d{2})/)
+        if (startTimeMatch && !meetingStartTime) {
+          const [hours, minutes] = startTimeMatch[1].split(':').map(Number)
+          const startTime = new Date()
+          startTime.setHours(hours, minutes, 0, 0)
+          setMeetingStartTime(startTime)
+        }
+        
+        // ライブダイジェストの抽出
+        try {
+          const digestMatch = content.match(/## ライブダイジェスト\n### 要約: (.+)\n([\s\S]*?)\n### 発言[▼▽]/)
+          if (digestMatch) {
+            const summary = digestMatch[1]
+            const detailsSection = digestMatch[2]
+            
+            // 詳細を抽出
+            const details = detailsSection.match(/^- (.+)$/gm)?.map(line => line.substring(2)) || []
+            
+            // 発言を抽出
+            const statementsMatch = content.match(/### 発言[▼▽]\n([\s\S]*?)\n\n---/)
+            const statements: { speaker: string; content: string }[] = []
+            if (statementsMatch) {
+              const statementsText = statementsMatch[1]
+              const statementLines = statementsText.match(/^- (.+?): (.+)$/gm) || []
+              statementLines.forEach(line => {
+                const match = line.match(/^- (.+?): (.+)$/)
+                if (match) {
+                  statements.push({ speaker: match[1], content: match[2] })
+                }
+              })
+            }
+            
+            setLiveDigest({ summary, details, statements })
+          } else {
+            setLiveDigest(null)
           }
-          
-          setLiveDigest({ summary, details, statements })
-        } else {
+        } catch (error) {
+          logger.error('Failed to extract live digest:', error)
           setLiveDigest(null)
         }
-      } catch (error) {
-        logger.error('Failed to extract live digest:', error)
+      } else {
+        setMinutes('')
         setLiveDigest(null)
+        setMeetingStartTime(null)
       }
-    } else {
+    } catch (error) {
+      logger.error('Error in LiveMinutesPanel useEffect:', error)
+      // エラーが発生してもUIをクラッシュさせない
       setMinutes('')
       setLiveDigest(null)
-      setMeetingStartTime(null)
     }
   }, [meeting])
 
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+      <div className="flex-shrink-0 flex items-center justify-between p-4 border-b bg-gray-50">
         <div className="flex items-center gap-3">
-          <h3 className="text-md font-semibold text-gray-900">📝 議事録（実況）</h3>
+          <h3 className="text-lg font-semibold text-gray-900">📝 議事録（実況）</h3>
           {isRecording && autoUpdateInterval > 0 && nextUpdateTime && (
             <div className="flex items-center gap-2 text-xs text-gray-600">
               {isAutoUpdating ? (
@@ -230,6 +237,7 @@ export default function LiveMinutesPanel({
                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
+            title="議事録とネクストステップを更新"
           >
             {isGenerating ? (
               <div className="flex items-center gap-2">
@@ -336,13 +344,13 @@ export default function LiveMinutesPanel({
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="text-4xl mb-4">📝</div>
-              <p className="text-gray-600 mb-4">議事録を生成してください</p>
+            <div className="flex flex-col items-center justify-center text-center flex-1">
+              <div className="text-6xl mb-6">📝</div>
+              <p className="text-lg text-gray-600 mb-6">議事録を生成してください</p>
               <button
                 onClick={onManualUpdate}
                 disabled={isLocked || isGenerating}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                className={`px-6 py-3 rounded-lg font-medium transition-colors text-base ${
                   isLocked || isGenerating
                     ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     : 'bg-blue-600 text-white hover:bg-blue-700'
@@ -360,10 +368,10 @@ export default function LiveMinutesPanel({
             </div>
           )
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="text-4xl mb-4">🎙️</div>
-            <p className="text-gray-600 mb-2">記録中の会議がありません</p>
-            <p className="text-sm text-gray-500">Google Meetで記録を開始してください</p>
+          <div className="flex flex-col items-center justify-center text-center" style={{ minHeight: 'calc(100vh - 400px)' }}>
+            <div className="text-6xl mb-6">🎙️</div>
+            <p className="text-lg text-gray-600 mb-4">記録中の会議がありません</p>
+            <p className="text-base text-gray-500">Google Meetで記録を開始してください</p>
           </div>
         )}
       </div>

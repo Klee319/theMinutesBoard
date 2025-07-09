@@ -180,9 +180,9 @@ export default function ResearchPanel({ meeting, isLocked = false }: ResearchPan
   }
 
   return (
-    <div className="h-full flex flex-col bg-white rounded-lg shadow-sm">
+    <div className="h-full flex flex-col">
       {/* ヘッダー */}
-      <div className="p-4 border-b">
+      <div className="flex-shrink-0 p-4 border-b bg-gray-50">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-900">🔍 リサーチ</h2>
           
@@ -207,7 +207,7 @@ export default function ResearchPanel({ meeting, isLocked = false }: ResearchPan
         
         {/* タブとボタン */}
         <div className="flex items-center justify-between">
-          <h3 className="text-md font-semibold text-gray-900">🔍 リサーチ & チャット</h3>
+          <h3 className="text-lg font-semibold text-gray-900">🔍 リサーチ & チャット</h3>
           
           {meeting && (
             <ResearchVoiceButton
@@ -222,18 +222,18 @@ export default function ResearchPanel({ meeting, isLocked = false }: ResearchPan
       {/* コンテンツ表示エリア - 統合ビュー */}
       <div className="flex-1 overflow-y-auto p-4">
         {!meeting ? (
-          <div className="text-center py-8">
-            <div className="text-4xl mb-2">🔍</div>
-            <p className="text-gray-500">会議が開始されるとリサーチ機能が利用できます</p>
+          <div className="flex flex-col items-center justify-center text-center flex-1">
+            <div className="text-6xl mb-6">🔍</div>
+            <p className="text-lg text-gray-600">会議が開始されるとリサーチ機能が利用できます</p>
           </div>
         ) : researchResults.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="text-4xl mb-2">🎤</div>
-            <p className="text-gray-500">
+          <div className="flex flex-col items-center justify-center text-center flex-1">
+            <div className="text-6xl mb-6">🎤</div>
+            <p className="text-lg text-gray-600 mb-4">
               音声ボタンを押してAIに質問したり、リサーチを依頼してください
             </p>
             {!isWebSearchEnabled && (
-              <p className="text-xs text-gray-400 mt-2">
+              <p className="text-base text-gray-500">
                 Web検索を有効にすると、より詳細なリサーチが可能になります
               </p>
             )}

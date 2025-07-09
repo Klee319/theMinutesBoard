@@ -223,6 +223,11 @@ export abstract class BaseAIService {
       const start = meetingInfo.startTime instanceof Date ? meetingInfo.startTime : new Date(meetingInfo.startTime)
       const end = meetingInfo.endTime instanceof Date ? meetingInfo.endTime : new Date(meetingInfo.endTime)
       duration = Math.floor((end.getTime() - start.getTime()) / 1000) // 秒単位
+    } else if (meetingInfo?.startTime && !meetingInfo?.endTime) {
+      // endTimeがない場合は現在時刻までの経過時間
+      const start = meetingInfo.startTime instanceof Date ? meetingInfo.startTime : new Date(meetingInfo.startTime)
+      const now = new Date()
+      duration = Math.floor((now.getTime() - start.getTime()) / 1000)
     } else {
       // その他の場合は、transcriptsから推定
       duration = transcripts ? this.calculateDuration(transcripts) : 0
@@ -243,24 +248,59 @@ export abstract class BaseAIService {
       logger.debug(`getEnhancedPrompt: Original transcripts count: ${transcripts.length}`)
     }
     
+    // 安全なDate処理のためのヘルパー関数
+    const safeGetDate = (date?: Date | string | number): Date => {
+      try {
+        if (!date) return new Date()
+        const result = date instanceof Date ? date : new Date(date)
+        return isNaN(result.getTime()) ? new Date() : result
+      } catch {
+        return new Date()
+      }
+    }
+    
+    const safeFormatLocaleString = (date?: Date | string | number): string => {
+      try {
+        const safeDate = safeGetDate(date)
+        return safeDate.toLocaleString('ja-JP')
+      } catch {
+        return new Date().toLocaleString('ja-JP')
+      }
+    }
+    
+    const safeFormatLocaleDateString = (date?: Date | string | number): string => {
+      try {
+        const safeDate = safeGetDate(date)
+        return safeDate.toLocaleDateString('ja-JP', { 
+          year: 'numeric', 
+          month: '2-digit', 
+          day: '2-digit' 
+        })
+      } catch {
+        return new Date().toLocaleDateString('ja-JP', { 
+          year: 'numeric', 
+          month: '2-digit', 
+          day: '2-digit' 
+        })
+      }
+    }
+    
     const templateVariables: Record<string, any> = {
       userName: settings?.userName || '不明な参加者',
-      meetingDate: meetingInfo?.startTime || new Date(),
-      startTime: meetingInfo?.startTime ? meetingInfo.startTime.toLocaleString('ja-JP') : new Date().toLocaleString('ja-JP'),
-      endTime: meetingInfo?.endTime ? meetingInfo.endTime.toLocaleString('ja-JP') : '',
+      meetingDate: safeGetDate(meetingInfo?.startTime),
+      startTime: safeFormatLocaleString(meetingInfo?.startTime),
+      endTime: meetingInfo?.endTime ? safeFormatLocaleString(meetingInfo.endTime) : '',
       participants: participants.join(', '),
       duration: durationText,
       transcripts: formattedTranscripts,
       speakerMap: transcripts ? this.buildSpeakerMap(transcripts) : {},
-      currentTime: new Date().toLocaleString('ja-JP'),
-      meetingTitle: meetingInfo?.startTime ? 
-        meetingInfo.startTime.toLocaleDateString('ja-JP', { 
-          year: 'numeric', 
-          month: '2-digit', 
-          day: '2-digit' 
-        }) + ' の会議' : 
-        '会議',
+      currentTime: safeFormatLocaleString(),
+      meetingTitle: safeFormatLocaleDateString(meetingInfo?.startTime) + ' の会議',
     }
+    
+    // デバッグ: startTimeとendTimeの値を確認
+    logger.debug(`Template variables - startTime: ${templateVariables.startTime}, endTime: ${templateVariables.endTime}`)
+    logger.debug(`MeetingInfo - startTime: ${meetingInfo?.startTime}, endTime: ${meetingInfo?.endTime}`)
     
     // デバッグログ: テンプレート変数の内容（transcriptsフィールドは長さのみ）
     const debugVariables = { ...templateVariables }
@@ -309,20 +349,65 @@ export abstract class BaseAIService {
     logger.debug(`buildNextStepsPrompt: meeting.startTime instanceof Date = ${meeting.startTime instanceof Date}`)
     
     // startTimeを安全にDate型に変換
-    const meetingStartTime = meeting.startTime instanceof Date 
-      ? meeting.startTime 
-      : new Date(meeting.startTime)
+    let meetingStartTime: Date
+    try {
+      if (meeting.startTime instanceof Date) {
+        meetingStartTime = meeting.startTime
+      } else {
+        meetingStartTime = new Date(meeting.startTime)
+      }
+      
+      // Invalid Date check
+      if (isNaN(meetingStartTime.getTime())) {
+        logger.warn('Invalid meeting startTime, using current date')
+        meetingStartTime = new Date()
+      }
+    } catch (error) {
+      logger.warn('Error parsing meeting startTime, using current date:', error)
+      meetingStartTime = new Date()
+    }
+    
+    // 安全な日付フォーマットのためのヘルパー関数
+    const safeFormatDate = (date: Date, options: Intl.DateTimeFormatOptions): string => {
+      try {
+        if (isNaN(date.getTime())) {
+          logger.warn('Invalid date provided to safeFormatDate, using current date')
+          return new Date().toLocaleDateString('ja-JP', options)
+        }
+        return date.toLocaleDateString('ja-JP', options)
+      } catch (error) {
+        logger.error('Error formatting date:', error)
+        return new Date().toLocaleDateString('ja-JP', options)
+      }
+    }
+    
+    const safeFormatDateTime = (date: Date): string => {
+      try {
+        if (isNaN(date.getTime())) {
+          logger.warn('Invalid date provided to safeFormatDateTime, using current date')
+          return new Date().toLocaleString('ja-JP')
+        }
+        return date.toLocaleString('ja-JP')
+      } catch (error) {
+        logger.error('Error formatting datetime:', error)
+        return new Date().toLocaleString('ja-JP')
+      }
+    }
     
     // テンプレート変数を準備（議事録生成と同じセット）
     const templateVariables: Record<string, any> = {
       userName: userName || '不明な参加者',
-      meetingDate: meetingStartTime,
-      startTime: meetingStartTime.toLocaleString('ja-JP'),
+      meetingDate: safeFormatDate(meetingStartTime, { 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      }),
+      startTime: safeFormatDateTime(meetingStartTime),
       participants: meeting.participants.join(', '),
       duration: durationText,
       transcripts: this.formatTranscriptsForNextSteps(meeting.transcripts),
       speakerMap: this.buildSpeakerMap(meeting.transcripts),
-      currentTime: new Date().toLocaleString('ja-JP'),
+      currentTime: safeFormatDateTime(new Date()),
     }
     
     // テンプレート変数を置換
@@ -418,22 +503,55 @@ export abstract class BaseAIService {
         // 期限の設定ロジック
         if (item.dueDate && item.dueDate !== 'null' && item.dueDate !== '未定') {
           try {
-            dueDate = new Date(item.dueDate)
+            // より安全な日付パース処理
+            let dateValue: Date
+            
+            if (typeof item.dueDate === 'string') {
+              // 文字列の場合、様々な形式に対応
+              if (item.dueDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                // YYYY-MM-DD形式の場合、タイムゾーンの問題を避けるため時刻を指定
+                dateValue = new Date(item.dueDate + 'T00:00:00.000Z')
+              } else {
+                dateValue = new Date(item.dueDate)
+              }
+            } else {
+              // 文字列以外の場合は直接Dateコンストラクタに渡す
+              dateValue = new Date(item.dueDate)
+            }
+            
             // Invalid Date チェック
-            if (isNaN(dueDate.getTime())) {
+            if (isNaN(dateValue.getTime())) {
               logger.warn(`parseNextStepsResponse: Invalid date ${item.dueDate} for task ${item.task}, using default`)
               dueDate = this.getDefaultDueDate(item.priority)
             } else {
-              logger.debug(`parseNextStepsResponse: Parsed date ${dueDate.toISOString()} for task ${item.task}`)
+              logger.debug(`parseNextStepsResponse: Parsed date ${dateValue.toISOString()} for task ${item.task}`)
+              dueDate = dateValue
             }
-          } catch {
-            logger.warn(`parseNextStepsResponse: Failed to parse date ${item.dueDate} for task ${item.task}, using default`)
+          } catch (error) {
+            logger.warn(`parseNextStepsResponse: Failed to parse date ${item.dueDate} for task ${item.task}, error:`, error)
             dueDate = this.getDefaultDueDate(item.priority)
           }
         } else {
           // AIが期限を設定しなかった場合のフォールバック
           logger.debug(`parseNextStepsResponse: No dueDate provided for task ${item.task}, using default`)
           dueDate = this.getDefaultDueDate(item.priority)
+        }
+
+        // createdAtとupdatedAtの安全な生成
+        let createdAt: Date
+        let updatedAt: Date
+        try {
+          createdAt = new Date()
+          updatedAt = new Date()
+          
+          // Invalid Date チェック
+          if (isNaN(createdAt.getTime()) || isNaN(updatedAt.getTime())) {
+            throw new Error('Failed to create valid timestamps')
+          }
+        } catch (error) {
+          logger.error('Failed to create timestamps, using epoch:', error)
+          createdAt = new Date(0)
+          updatedAt = new Date(0)
         }
 
       return {
@@ -447,8 +565,8 @@ export abstract class BaseAIService {
         priority: item.priority || 'medium',
         dependencies: [],
         notes: item.notes || '',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt,
+        updatedAt,
         source: item.source || 'user' // デフォルトはユーザー指示
       }
     })
@@ -520,18 +638,33 @@ export abstract class BaseAIService {
       let replacementValue: string
       if (value instanceof Date) {
         // 日付の場合はISO形式（YYYY-MM-DD）に変換
-        replacementValue = value.toISOString().split('T')[0]
-        logger.debug(`replaceTemplateVariables: Converting Date ${key} = ${value} -> ${replacementValue}`)
+        try {
+          if (isNaN(value.getTime())) {
+            logger.warn(`replaceTemplateVariables: Invalid Date for ${key}, using current date`)
+            replacementValue = new Date().toISOString().split('T')[0]
+          } else {
+            replacementValue = value.toISOString().split('T')[0]
+          }
+          logger.debug(`replaceTemplateVariables: Converting Date ${key} = ${value} -> ${replacementValue}`)
+        } catch (error) {
+          logger.error(`replaceTemplateVariables: Error converting Date for ${key}:`, error)
+          replacementValue = new Date().toISOString().split('T')[0]
+        }
       } else if (typeof value === 'object' && value !== null) {
         // Dateオブジェクトかもしれないが、instanceof Dateでは検出されない場合の対策
         if (value.toString && value.toString().includes('GMT')) {
           // Date-likeオブジェクトの場合
-          const dateValue = new Date(value)
-          if (!isNaN(dateValue.getTime())) {
-            replacementValue = dateValue.toISOString().split('T')[0]
-            logger.debug(`replaceTemplateVariables: Converting Date-like object ${key} = ${value} -> ${replacementValue}`)
-          } else {
-            // オブジェクトの場合はJSON文字列に変換
+          try {
+            const dateValue = new Date(value)
+            if (!isNaN(dateValue.getTime())) {
+              replacementValue = dateValue.toISOString().split('T')[0]
+              logger.debug(`replaceTemplateVariables: Converting Date-like object ${key} = ${value} -> ${replacementValue}`)
+            } else {
+              // オブジェクトの場合はJSON文字列に変換
+              replacementValue = JSON.stringify(value, null, 2)
+            }
+          } catch (error) {
+            logger.error(`replaceTemplateVariables: Error converting Date-like object for ${key}:`, error)
             replacementValue = JSON.stringify(value, null, 2)
           }
         } else {

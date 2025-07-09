@@ -50,7 +50,7 @@
 # 会議議事録 - {{meetingDate}}
 
 ## 会議情報
-- **日時**: {{meetingDate}} {{startTime}}
+- **日時**: {{startTime}}
 - **参加者**: {{participants}}
 - **記録者**: {{userName}}
 
