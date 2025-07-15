@@ -17,11 +17,6 @@ export class ClaudeService extends BaseAIService {
     
     const enhancedPrompt = await this.getEnhancedPrompt(settings, processedTranscripts, meetingInfo, promptType)
     
-    // デバッグ: 送信するプロンプトの内容を確認
-    console.log('[CLAUDE DEBUG] Transcripts count:', processedTranscripts.length)
-    console.log('[CLAUDE DEBUG] Enhanced prompt length:', enhancedPrompt.length)
-    console.log('[CLAUDE DEBUG] Prompt contains {{transcripts}}?:', enhancedPrompt.includes('{{transcripts}}'))
-    console.log('[CLAUDE DEBUG] Prompt first 1000 chars:', enhancedPrompt.substring(0, 1000))
     
     try {
       const response = await fetch(`${this.baseURL}/messages`, {
@@ -159,9 +154,6 @@ export class ClaudeService extends BaseAIService {
   ): Promise<NextStep[]> {
     const prompt = this.buildNextStepsPrompt(meeting, userPrompt, userName)
     
-    // デバッグ: プロンプトの一部をログ出力
-    console.log('[CLAUDE DEBUG] NextSteps prompt first 500 chars:', prompt.substring(0, 500))
-    console.log('[CLAUDE DEBUG] NextSteps prompt contains MEETING_DATE?:', prompt.includes('MEETING_DATE'))
     
     try {
       const response = await fetch(`${this.baseURL}/messages`, {
@@ -190,8 +182,6 @@ export class ClaudeService extends BaseAIService {
       const data = await response.json()
       const content = data.content[0]?.text || ''
       
-      // デバッグ: AIの応答をログ出力
-      console.log('[CLAUDE DEBUG] NextSteps AI response first 500 chars:', content.substring(0, 500))
       
       return this.parseNextStepsResponse(content, meeting.id)
     } catch (error) {

@@ -84,7 +84,7 @@ export class OpenRouterService extends BaseAIService {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://localhost:3000/',
+          'HTTP-Referer': 'https://theminutesboard.com/',
           'X-Title': 'theMinutesBoard'
         },
         body: requestBodyStr
@@ -170,7 +170,7 @@ export class OpenRouterService extends BaseAIService {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://localhost:3000/',
+          'HTTP-Referer': 'https://theminutesboard.com/',
           'X-Title': 'theMinutesBoard'
         },
         body: JSON.stringify({

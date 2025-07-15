@@ -548,7 +548,7 @@ function App() {
           <p>theMinutesBoard v1.0.0</p>
           <p className="mt-1">
             <a 
-              href="https://github.com/yourusername/theMinutesBoard" 
+              href="https://github.com/anthropics/theMinutesBoard" 
               target="_blank" 
               rel="noopener noreferrer"
               className="text-primary-600 hover:underline"

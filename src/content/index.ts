@@ -3,6 +3,7 @@ import { logger } from '@/utils/logger'
 import { ChromeErrorHandler, ServiceWorkerKeepAlive } from '@/utils/chrome-error-handler'
 import { formatMarkdownToHTML } from '@/utils/markdown'
 import { CAPTION_SELECTORS, CAPTION_BUTTON_SELECTORS, SPEAKER_SELECTORS, LEAVE_BUTTON_SELECTORS, LEAVE_CONFIRM_SELECTORS } from '@/constants/selectors'
+import { TIMING_CONFIG } from '@/constants/config'
 import './styles.css'
 
 class TranscriptCapture {
@@ -29,8 +30,8 @@ class TranscriptCapture {
   // メモリ管理用の変数
   private transcriptBuffer: any[] = []
   private lastFlushTime = Date.now()
-  private flushInterval = 5000 // 5秒ごとにバッファをフラッシュ
-  private maxBufferSize = 50 // 最大バッファサイズ
+  private flushInterval = TIMING_CONFIG.TRANSCRIPT_BUFFER_FLUSH_INTERVAL // 5秒ごとにバッファをフラッシュ
+  private maxBufferSize = TIMING_CONFIG.TRANSCRIPT_BUFFER_SIZE // 最大バッファサイズ
   
   constructor() {
     this.initAsync()
@@ -394,7 +395,7 @@ class TranscriptCapture {
           // 字幕の状態をチェック
           this.checkForCaptions()
           sendResponse({ 
-            success: true, 
+            success: !!this.captionsContainer,
             hasCaptions: !!this.captionsContainer 
           })
           break
@@ -404,20 +405,14 @@ class TranscriptCapture {
           this.checkForCaptions()
           
           if (!this.captionsContainer) {
-            logger.warn('Captions not available, cannot start recording')
+            // 字幕が無効な場合はエラーレスポンスを返す（コンソールログは削除）
             this.showNotification('字幕が有効になっていません。Google Meetの字幕をONにしてから記録を開始してください。', 'error')
             sendResponse({ success: false, error: '字幕が有効になっていません。Google Meetの字幕をONにしてください。' })
           } else {
-            logger.info('Captions container found, notifying background script')
-            // Background scriptに字幕チェック済みの記録開始を通知
-            chrome.runtime.sendMessage({
-              type: 'START_RECORDING_CONFIRMED',
-              payload: message.payload
-            }).then(() => {
-              this.startRecording()
+            // 字幕が有効な場合のみ記録を開始
+            this.startRecording().then(() => {
               sendResponse({ success: true })
             }).catch(error => {
-              logger.error('Failed to start recording via background:', error)
               sendResponse({ success: false, error: error.message })
             })
           }
@@ -500,14 +495,6 @@ class TranscriptCapture {
           sendResponse({ success: true })
           break
           
-        case 'CHECK_CAPTIONS':
-          // 字幕の状態をチェック
-          this.checkForCaptions()
-          const hasCaptions = !!this.captionsContainer
-          logger.info('Caption status check:', hasCaptions)
-          sendResponse({ success: true, hasCaptions })
-          break
-          
         default:
           sendResponse({ success: false, error: 'Unknown message type' })
       }
@@ -530,11 +517,11 @@ class TranscriptCapture {
       } else if (attemptCount >= maxAttempts) {
         clearInterval(checkInterval)
         this.cleanupIntervals.delete(checkInterval)
-        logger.warn('Captions container not found after maximum attempts')
+        logger.debug('Captions container not found after maximum attempts')
       } else if (attemptCount % 5 === 0) {
         logger.debug(`Still waiting for captions... (attempt ${attemptCount}/${maxAttempts})`)
       }
-    }, 1000)
+    }, TIMING_CONFIG.CAPTIONS_MAX_WAIT_TIME / 30)
     
     this.cleanupIntervals.add(checkInterval)
   }
@@ -598,7 +585,7 @@ class TranscriptCapture {
       }
     }
     
-    logger.warn('No captions container found after checking all selectors')
+    logger.debug('No captions container found after checking all selectors')
     return false
   }
   
@@ -610,25 +597,23 @@ class TranscriptCapture {
     
     // 字幕コンテナを再度チェック（複数回試行）
     let captionsFound = false
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < TIMING_CONFIG.CAPTIONS_RETRY_COUNT; i++) {
       if (this.checkForCaptions()) {
         captionsFound = true
         break
       }
       if (i < 2) {
         // 待機してから再試行（最後の試行では待機しない）
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        await new Promise(resolve => setTimeout(resolve, TIMING_CONFIG.CAPTIONS_RETRY_DELAY))
         logger.debug(`Caption check attempt ${i + 1} failed, retrying...`)
       }
     }
     
     if (!captionsFound || !this.captionsContainer) {
-      logger.warn('No captions container found after multiple attempts')
-      
-      // 字幕なしでは記録を開始できないことを通知
+      // 字幕なしでは記録を開始できないことを通知（コンソールログは削除）
       this.showNotification('字幕を有効にしてから、もう一度記録開始ボタンをクリックしてください。', 'error')
       this.highlightCaptionButton()
-      return
+      return // ここで必ずリターンする
     }
     
     this.isRecording = true
@@ -692,7 +677,7 @@ class TranscriptCapture {
       
       logger.info('MutationObserver set up for captions')
     } else {
-      logger.warn('No captions container, MutationObserver not set up')
+      logger.debug('No captions container, MutationObserver not set up')
       // 定期的に字幕コンテナをチェック
       this.startCaptionPolling()
     }
@@ -798,7 +783,7 @@ class TranscriptCapture {
       }
     }
     
-    const urlCheckInterval = setInterval(debouncedCheckUrl, 500) // 0.5秒ごとにチェック（退出をより早く検知）
+    const urlCheckInterval = setInterval(debouncedCheckUrl, TIMING_CONFIG.URL_CHECK_INTERVAL) // 0.5秒ごとにチェック（退出をより早く検知）
     this.cleanupIntervals.add(urlCheckInterval)
     
     // popstateイベントでも監視（ブラウザの戻る/進むボタン）
@@ -871,7 +856,7 @@ class TranscriptCapture {
     }
     
     // 定期的にボタンをチェック（動的に追加される可能性があるため）
-    const checkButtonInterval = setInterval(checkCallEndButton, 3000)
+    const checkButtonInterval = setInterval(checkCallEndButton, TIMING_CONFIG.TRANSCRIPT_CHECK_INTERVAL)
     this.cleanupIntervals.add(checkButtonInterval)
     checkCallEndButton() // 初回実行
   }
@@ -923,7 +908,7 @@ class TranscriptCapture {
     }
     
     // 定期的にチェック
-    const elementsCheckInterval = setInterval(checkMeetingElements, 3000)
+    const elementsCheckInterval = setInterval(checkMeetingElements, TIMING_CONFIG.TRANSCRIPT_CHECK_INTERVAL)
     this.cleanupIntervals.add(elementsCheckInterval)
     
     // MutationObserverでもメイン要素の削除を監視
@@ -1709,7 +1694,7 @@ class TranscriptCapture {
       notification.classList.add('fade-out')
       const removeTimeout = setTimeout(() => notification.remove(), 300)
       this.cleanupTimeouts.add(removeTimeout)
-    }, type === 'error' ? 5000 : 3000) // エラーメッセージは長めに表示
+    }, type === 'error' ? TIMING_CONFIG.TOAST_DISPLAY_TIME.ERROR : TIMING_CONFIG.TOAST_DISPLAY_TIME.SUCCESS) // エラーメッセージは長めに表示
     this.cleanupTimeouts.add(fadeTimeout)
   }
   
@@ -1775,7 +1760,7 @@ class TranscriptCapture {
       if (!captionsAvailable || !this.captionsContainer) {
         // 最後のチェックから5秒以上経過している場合のみ警告
         if (now - this.lastCaptionCheckTime > 5000) {
-          logger.warn('Captions turned off during recording')
+          logger.debug('Captions turned off during recording')
           this.showNotification('警告：字幕がOFFになっています。字幕をONにしないと文字起こしが記録されません。', 'error')
           this.highlightCaptionButton()
           this.lastCaptionCheckTime = now

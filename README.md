@@ -58,16 +58,28 @@ Google Meetの会議内容を自動的に記録し、AI を使用してリアル
 - 視覚的なカウントダウン表示
 
 ### 🛡️ 安定性とエラー対策
-- Extension context invalidatedエラーの自動回復
+- Extension context invalidatedエラーの自動回復（ChromeErrorHandlerクラス）
 - 長時間利用時の自動ストレージ管理
 - APIタイムアウトとリトライ機能
 - ユーザーフレンドリーなエラーメッセージ
+- Service Workerのキープアライブ機能
+
+### 💾 データエクスポート（部分実装）
+- マークダウン形式でのエクスポート
+- テキスト形式でのエクスポート
+- JSON形式でのエクスポート（議事録のみ）
+- ※CSV形式とネクストステップのエクスポートは未実装
+
+### 📚 会議履歴管理（部分実装）
+- 日付範囲での会議履歴フィルタリング
+- 会議一覧の表示
+- ※キーワード検索機能は未実装
 
 ## インストール方法
 
 1. リポジトリをクローン
 ```bash
-git clone https://github.com/Klee319/theMinutesBoard.git
+git clone https://github.com/anthropics/theMinutesBoard.git
 cd theMinutesBoard
 ```
 
@@ -133,7 +145,9 @@ npm run build
 - **ビルドツール**: Vite
 - **拡張機能**: Chrome Extension Manifest V3
 - **AI統合**: 複数のAIプロバイダーAPI
-- **コード品質**: 共通定数の集約化、関数のモジュール化
+- **状態管理**: Zustand
+- **データベース**: Prisma ORM対応（開発環境：SQLite、本番環境：PostgreSQL/MySQL互換）
+- **コード品質**: 共通定数の集約化、関数のモジュール化、設定の外部化
 
 ## 開発
 
@@ -189,9 +203,16 @@ Klee319
 
 ---
 
-最終更新日: 2025年1月30日
+最終更新日: 2025年7月15日
 
 ## 更新履歴
+
+### v2.2.1 (2025年7月15日) 
+- 🔧 ハードコードされた設定値を外部化（config.ts）
+- 🐛 デバッグログの削除とloggerへの統一
+- 📝 仕様書とタスク管理書の再作成
+- 🚀 パフォーマンス最適化提案書の作成
+- 🔗 GitHubリポジトリURLの修正
 
 ### v2.2.0 (2025年1月30日)
 - 🎯 議事録表示を議題ごとの折りたたみ形式に改善

@@ -47,6 +47,10 @@ export const ResearchVoiceButton: React.FC<ResearchVoiceButtonProps> = ({
 
         if (stopResponse?.success && stopResponse.transcripts) {
           // 記録された音声内容を取得
+          logger.info('Voice recording stop response:', {
+            transcriptsCount: stopResponse.transcripts.length,
+            transcripts: stopResponse.transcripts.slice(0, 3) // 最初の3件を表示
+          })
           const voiceQuery = stopResponse.transcripts
             .map((t: any) => t.content)
             .join(' ')

@@ -32,7 +32,7 @@
 # 会議議事録 - {{meetingDate}}
 
 ## 会議情報
-- **日時**: {{meetingDate}} {{startTime}}
+- **日時**: {{startTime}}
 - **参加者**: {{participants}}
 - **記録者**: {{userName}}
 
@@ -98,12 +98,6 @@
 - `{{transcripts}}` - 発言記録
 - `{{speakerMap}}` - 話者マップ
 - `{{currentTime}}` - 現在時刻（議事録更新時刻）
-
-## 会議情報
-
-- 開始時刻: {{startTime}}
-- 参加者: {{participants}}
-- 会議時間: {{duration}}
 
 ## 発言記録
 

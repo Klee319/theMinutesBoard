@@ -207,7 +207,7 @@ export default function ResearchPanel({ meeting, isLocked = false }: ResearchPan
         
         {/* タブとボタン */}
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">🔍 リサーチ & チャット</h3>
+          <h3 className="text-lg font-semibold text-gray-900">🔍 リサーチ</h3>
           
           {meeting && (
             <ResearchVoiceButton

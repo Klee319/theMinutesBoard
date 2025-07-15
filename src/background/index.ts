@@ -7,6 +7,7 @@ import { logger } from '@/utils/logger'
 import { storageService } from '@/services/storage'
 import { SessionRecovery } from '@/utils/session-recovery'
 import { TRANSCRIPT_CONSTANTS, STORAGE_CONSTANTS, TIMING_CONSTANTS, API_CONSTANTS } from '../constants'
+import { TIMING_CONFIG, STORAGE_CONFIG } from '@/constants/config'
 
 let currentMeetingId: string | null = null
 let recordingTabId: number | null = null
@@ -15,9 +16,8 @@ let recordingTabId: number | null = null
 let isMinutesGenerating = false
 
 // ストレージ管理用の定数
-const STORAGE_WARNING_THRESHOLD = 0.7 // 70%使用で警告
-const STORAGE_CRITICAL_THRESHOLD = 0.85 // 85%使用でクリティカル
-const MAX_TRANSCRIPTS_PER_MEETING = TRANSCRIPT_CONSTANTS.MAX_TRANSCRIPTS_PER_MEETING
+const STORAGE_WARNING_THRESHOLD = STORAGE_CONFIG.STORAGE_WARNING_THRESHOLD
+const MAX_TRANSCRIPTS_PER_MEETING = STORAGE_CONFIG.MAX_TRANSCRIPTS_PER_MEETING
 const TRANSCRIPT_BATCH_SIZE = TRANSCRIPT_CONSTANTS.MAX_BUFFER_SIZE
 
 // 共有状態
@@ -197,8 +197,8 @@ let keepAliveInterval: NodeJS.Timeout | null = null
 function startKeepAlive() {
   if (keepAliveInterval) return
   
-  // 25秒ごとにアラームを設定（Service Workerは30秒で非アクティブになるため）
-  chrome.alarms.create('keep-alive', { periodInMinutes: 0.4 }) // 24秒
+  // Keep-aliveアラームを設定
+  chrome.alarms.create('keep-alive', { periodInMinutes: TIMING_CONFIG.KEEP_ALIVE_INTERVAL / 60000 })
   logger.info('Keep-alive alarm created')
 }
 
@@ -219,7 +219,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 })
 
 // ストレージのクリーンアップアラームを設定
-chrome.alarms.create('storage-cleanup', { periodInMinutes: 30 }) // 30分ごと
+chrome.alarms.create('storage-cleanup', { periodInMinutes: TIMING_CONFIG.STORAGE_CLEANUP_INTERVAL / 60000 })
 
 // 記録開始時にキープアライブを開始
 function onRecordingStarted() {
@@ -550,12 +550,9 @@ async function handleActualStartRecording(tabId?: number, payload?: any): Promis
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message))
         } else {
-          console.log('Recording started:', currentMeetingId)
-          console.log('Initial participants:', newMeeting.participants)
-          console.log('Total meetings after save:', meetings.length)
           // ストレージ容量を確認
           chrome.storage.local.getBytesInUse(['meetings'], (bytesInUse) => {
-            console.log('Storage used for meetings:', bytesInUse, 'bytes')
+            logger.debug('Storage used for meetings:', bytesInUse, 'bytes')
           })
           resolve()
         }
@@ -607,7 +604,6 @@ async function generateHistoryMinutesIfNeeded(meeting: Meeting): Promise<void> {
   currentMeetingId = meeting.id
   
   try {
-    console.log('Generating history minutes for meeting:', meeting.id)
     
     // endTimeがない場合は現在時刻を設定
     if (!meeting.endTime) {
@@ -626,7 +622,6 @@ async function generateHistoryMinutesIfNeeded(meeting: Meeting): Promise<void> {
     
     const result = await handleGenerateMinutes({ promptType: 'history' })
     if (result.success) {
-      console.log('History minutes generated successfully')
       
       // 履歴用議事録を別フィールドに保存
       chrome.storage.local.get(['meetings'], (storageResult) => {
@@ -672,7 +667,6 @@ function notifyAllMeetTabs(meetingId: string): void {
 
 async function handleStopRecording(): Promise<void> {
   if (!currentMeetingId) {
-    console.log('No active recording to stop')
     return
   }
   
@@ -695,7 +689,6 @@ async function handleStopRecording(): Promise<void> {
     const meeting = meetings.find(m => m.id === stoppedMeetingId)
     
     if (meeting) {
-      console.log('Recording stopped:', stoppedMeetingId)
       
       // 履歴用議事録を生成（バックグラウンドで実行）
       await generateHistoryMinutesIfNeeded(meeting)
@@ -720,14 +713,9 @@ async function handleStopRecording(): Promise<void> {
 }
 
 async function handleTranscriptUpdate(transcript: any): Promise<void> {
-  console.log('[TRANSCRIPT DEBUG] Received transcript:', transcript)
-  
   if (!currentMeetingId) {
-    console.log('[TRANSCRIPT DEBUG] No active recording (currentMeetingId is null)')
     return
   }
-  
-  console.log('[TRANSCRIPT DEBUG] Current meeting ID:', currentMeetingId)
   
   return new Promise(async (resolve, reject) => {
     chrome.storage.local.get(['meetings'], async (result) => {
@@ -887,13 +875,6 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
             return
           }
           
-          // デバッグ: 文字起こしデータの内容を確認
-          console.log('[BACKGROUND DEBUG] Meeting ID:', currentMeetingId)
-          console.log('[BACKGROUND DEBUG] Transcripts count:', currentMeeting.transcripts.length)
-          if (currentMeeting.transcripts.length > 0) {
-            console.log('[BACKGROUND DEBUG] First transcript:', currentMeeting.transcripts[0])
-            console.log('[BACKGROUND DEBUG] Last transcript:', currentMeeting.transcripts[currentMeeting.transcripts.length - 1])
-          }
           
           if (currentMeeting.transcripts.length === 0) {
             isMinutesGenerating = false
@@ -944,14 +925,9 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
             const startTime = normalizeDate(currentMeeting.startTime)
             const endTime = normalizeDate(currentMeeting.endTime)
             
-            // デバッグ: 時刻情報の確認
-            console.log(`[MINUTES DEBUG] currentMeeting.startTime: ${currentMeeting.startTime}`)
-            console.log(`[MINUTES DEBUG] currentMeeting.endTime: ${currentMeeting.endTime}`)
-            console.log(`[MINUTES DEBUG] normalized startTime: ${startTime}`)
-            console.log(`[MINUTES DEBUG] normalized endTime: ${endTime}`)
             
             // AIサービス呼び出しログ（重要な情報のみ）
-            console.log(`Generating minutes: ${currentMeeting.transcripts.length} transcripts, provider: ${mergedSettings.aiProvider || 'default'}`)
+            logger.info(`Generating minutes: ${currentMeeting.transcripts.length} transcripts, provider: ${mergedSettings.aiProvider || 'default'}`)
             
             // 議事録を生成（会議の時刻情報を含める）
             const minutes = await aiService.generateMinutes(
@@ -1014,11 +990,11 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
               })
               
               // ネクストステップを自動生成（議事録更新時は常に再生成）
-              console.log('Auto-generating/updating next steps for meeting:', currentMeetingId)
+              logger.info('Auto-generating/updating next steps for meeting:', currentMeetingId)
               handleGenerateNextSteps({ meetingId: currentMeetingId, userPrompt: '' })
                 .then((result) => {
                   if (result.success) {
-                    console.log('Next steps auto-generated/updated successfully')
+                    logger.info('Next steps auto-generated/updated successfully')
                     
                     // 全タブにネクストステップ更新完了を通知
                     chrome.tabs.query({}, (tabs) => {
@@ -1035,7 +1011,7 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
                       })
                     })
                   } else {
-                    console.error('Failed to auto-generate/update next steps:', result.error)
+                    logger.error('Failed to auto-generate/update next steps:', result.error)
                   }
                 })
                 .catch((error) => {
@@ -1160,7 +1136,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 async function handleParticipantUpdate(payload: any): Promise<void> {
   if (!currentMeetingId) {
-    console.log('No active recording for participant update')
     return
   }
   
@@ -1179,7 +1154,6 @@ async function handleParticipantUpdate(payload: any): Promise<void> {
         
         if (payload.action === 'joined') {
           participants.add(payload.participant)
-          console.log(`Participant joined: ${payload.participant}`)
           
           // 参加者の入室を記録
           meetings[meetingIndex].transcripts.push({
@@ -1191,7 +1165,6 @@ async function handleParticipantUpdate(payload: any): Promise<void> {
           })
         } else if (payload.action === 'left') {
           participants.delete(payload.participant)
-          console.log(`Participant left: ${payload.participant}`)
           
           // 参加者の退室を記録
           meetings[meetingIndex].transcripts.push({
@@ -1220,11 +1193,11 @@ async function handleParticipantUpdate(payload: any): Promise<void> {
 }
 
 async function handleCallEnded(reason: string, timestamp: string, tabId?: number): Promise<{ success: boolean }> {
-  console.log('Call ended detected in background:', { reason, timestamp, tabId, currentMeetingId, recordingTabId })
+  logger.info('Call ended detected in background:', { reason, timestamp, tabId, currentMeetingId, recordingTabId })
   
   // 現在記録中の会議があり、該当タブからの通知の場合のみ処理
   if (!currentMeetingId || (tabId && tabId !== recordingTabId)) {
-    console.log('No active recording or tab mismatch, ignoring call end')
+    logger.debug('No active recording or tab mismatch, ignoring call end')
     return { success: true }
   }
   
@@ -1251,10 +1224,9 @@ async function handleCallEnded(reason: string, timestamp: string, tabId?: number
       })
       
       // 記録を自動停止
-      console.log('Auto-stopping recording due to call end')
+      logger.info('Auto-stopping recording due to call end')
       await handleStopRecording()
       
-      console.log('Meeting end time updated:', meetings[meetingIndex])
       
       // 履歴用議事録を生成（非同期で実行し、完了後にviewerに通知）
       const meeting = meetings[meetingIndex]
@@ -1302,7 +1274,7 @@ async function handleCallEnded(reason: string, timestamp: string, tabId?: number
       // エラーは無視（viewerが開いていない可能性）
     })
     
-    console.log('Call end handling completed successfully')
+    logger.info('Call end handling completed successfully')
     return { success: true }
     
   } catch (error) {
@@ -1741,13 +1713,28 @@ User Query: ${question}
 ${transcripts.length > 0 ? `【音声入力中の内容】\n${transcripts.join('\n')}\n` : ''}
 `
     
-    // デバッグ用ログ（簡潔に）
-    logger.info(`AI Research - Query: "${question}", Context: ${currentTopicSummary ? 'Available' : 'Not available'}, Transcripts: ${differenceTranscripts.length}`)
+    // デバッグ用ログ
+    logger.info(`AI Research Debug:`, {
+      query: question,
+      contextAvailable: !!currentTopicSummary,
+      sessionExists: !!session,
+      sessionType: session?.type,
+      startIndex: session?.startTranscriptIndex,
+      differenceTranscripts: differenceTranscripts.length,
+      voiceTranscripts: transcripts.length,
+      transcriptsUsed: transcripts
+    })
     
     const response = await aiService.generateText(researchPrompt, {
       maxTokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
       temperature: 0.7
     })
+    
+    // リサーチ処理が完了したらセッションを削除
+    if (session) {
+      aiAssistantSessions.delete(meetingId)
+      logger.info(`AI Research session cleaned up for meeting: ${meetingId}`)
+    }
     
     return { success: true, response }
   } catch (error) {
@@ -1836,7 +1823,7 @@ async function performStorageCleanup(): Promise<void> {
     
     // 古い会議データの削除（30日以上前）
     const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - TIMING_CONFIG.OLD_MEETING_RETENTION_DAYS)
     
     const meetings = await storageService.getMeetings()
     const oldMeetings = meetings.filter(m => {
@@ -1927,6 +1914,7 @@ const aiAssistantSessions = new Map<string, {
   startTime: Date
   transcripts: Transcript[]
   type: 'nextsteps' | 'research'
+  startTranscriptIndex: number  // 録音開始時の字幕インデックスを記録
 }>()
 
 // 古いセッションを定期的にクリーンアップ
@@ -1964,10 +1952,60 @@ async function handleAIAssistantStart(payload: { meetingId: string; type?: 'next
     }
   }
   
+  // 記録中のタブIDを取得
+  const tabId = recordingTabId
+  if (!tabId) {
+    return { success: false, error: '記録中の会議が見つかりません' }
+  }
+  
+  // Content Scriptに字幕チェックを依頼
+  try {
+    const response = await new Promise<{success: boolean; error?: string}>((resolve, reject) => {
+      chrome.tabs.sendMessage(tabId, { type: 'CHECK_CAPTIONS' }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message))
+        } else {
+          resolve(response)
+        }
+      })
+    })
+    
+    if (!response || !response.success) {
+      return { 
+        success: false, 
+        error: '字幕が有効になっていません。Google Meetの字幕をONにしてから音声記録を開始してください。' 
+      }
+    }
+  } catch (error) {
+    logger.error('Failed to check captions:', error)
+    return { 
+      success: false, 
+      error: '字幕の確認に失敗しました。Google Meetの字幕をONにしてから音声記録を開始してください。' 
+    }
+  }
+  
   // 既存のセッションがある場合は削除
   if (aiAssistantSessions.has(meetingId)) {
     logger.warn('AI Assistant session already exists for this meeting, replacing it')
     aiAssistantSessions.delete(meetingId)
+  }
+  
+  // 現在の会議の字幕数を取得して開始インデックスを記録
+  let startTranscriptIndex = 0
+  try {
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const currentMeeting = meetings.find(m => m.id === meetingId)
+    if (currentMeeting) {
+      startTranscriptIndex = currentMeeting.transcripts.length
+      logger.info(`Recording starting at transcript index: ${startTranscriptIndex}`)
+    }
+  } catch (error) {
+    logger.error('Failed to get start transcript index:', error)
   }
   
   // 新しいセッションを開始
@@ -1975,7 +2013,8 @@ async function handleAIAssistantStart(payload: { meetingId: string; type?: 'next
     meetingId,
     startTime: new Date(),
     transcripts: [],
-    type
+    type,
+    startTranscriptIndex
   })
   
   // アクティブセッションを記録
@@ -1998,12 +2037,41 @@ async function handleAIAssistantStop(payload: { meetingId: string }): Promise<{ 
     return { success: false, error: 'No active AI Assistant session found' }
   }
   
-  // セッション中に記録された字幕のみを返す
-  const transcripts = session.transcripts
+  // セッション開始時からの差分字幕を取得
+  let transcripts: Transcript[] = []
+  try {
+    const meetings = await new Promise<Meeting[]>((resolve) => {
+      chrome.storage.local.get(['meetings'], (result) => {
+        resolve(result.meetings || [])
+      })
+    })
+    
+    const currentMeeting = meetings.find(m => m.id === meetingId)
+    if (currentMeeting) {
+      // 開始インデックスから現在までの字幕を取得（差分）
+      transcripts = currentMeeting.transcripts.slice(session.startTranscriptIndex)
+      logger.info(`AI Assistant Stop Debug:`, {
+        meetingId,
+        sessionType: session.type,
+        startIndex: session.startTranscriptIndex,
+        currentTranscriptsLength: currentMeeting.transcripts.length,
+        diffTranscriptsLength: transcripts.length,
+        diffContent: transcripts.map(t => `${t.speaker}: ${t.content}`).slice(0, 3) // 最初の3件を表示
+      })
+      
+      // セッションに差分字幕を保存（リサーチ時に使用するため）
+      session.transcripts = transcripts
+    }
+  } catch (error) {
+    logger.error('Failed to get transcript diff:', error)
+    // エラーの場合はセッションに記録された字幕を使用
+    transcripts = session.transcripts
+  }
   
-  logger.info(`AI Assistant recording stopped for meeting: ${meetingId}, recorded ${transcripts.length} transcripts during session`)
+  logger.info(`AI Assistant recording stopped for meeting: ${meetingId}, returning ${transcripts.length} transcripts`)
   
-  aiAssistantSessions.delete(meetingId)
+  // セッションは削除せず、リサーチ処理後に削除する
+  // aiAssistantSessions.delete(meetingId)
   
   // アクティブセッションをクリア
   if (activeVoiceSession?.meetingId === meetingId) {

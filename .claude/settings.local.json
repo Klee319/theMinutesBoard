@@ -21,13 +21,12 @@
       "Bash(pwd:*)",
       "Bash(pip:*)",
       "Bash(python:*)",
-      "Bash(rm:*)",
       "Bash(rg:*)",
-      "Bash(zip:*)",
-      "Bash(tar:*)",
-      "Bash(gh:*)",
-      "Bash(gemini:*)",
-      "Bash(env)"
+      "Bash(sqlite3:*)",
+      "Bash(pkill:*)",
+      "Bash(python3:*)",
+      "Bash(claude:*)",
+      "Bash(gemini:*)"
     ],
     "deny": []
   },
