@@ -39,6 +39,7 @@
     "vite": "^5.4.19"
   },
   "devDependencies": {
+    "@eslint/js": "^9.31.0",
     "@google/generative-ai": "^0.24.1",
     "@playwright/test": "^1.54.1",
     "@prisma/client": "^6.8.2",
@@ -56,6 +57,7 @@
     "eslint": "^9.31.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.3.0",
     "husky": "^9.1.7",
     "jsdom": "^26.1.0",
     "lint-staged": "^15.5.2",

@@ -424,7 +424,7 @@ function App() {
       {/* ヘッダー */}
       <header className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700" role="banner">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-nowrap">
             <div className="flex items-center gap-4">
               <h1 className="text-xl font-bold text-gray-900">theMinutesBoard</h1>
               <div className="flex gap-2">
@@ -474,50 +474,54 @@ function App() {
             
             <div className="flex items-center gap-4 min-h-[40px]">
               {/* ライブモード時のトグルスイッチ */}
-              {isLiveMode && (
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-500">表示/非表示切り替え：</span>
-                  {/* ネクストステップトグル */}
-                  <label className="flex items-center gap-2 cursor-pointer" title="ネクストステップパネルの表示/非表示を切り替えます">
-                    <span className="text-sm text-gray-700">📝 ネクストステップ</span>
-                    <div className="relative">
-                      <input
-                        type="checkbox"
-                        checked={showNextStepsPanel}
-                        onChange={(e) => setShowNextStepsPanel(e.target.checked)}
-                        className="sr-only"
-                      />
-                      <div className={`w-10 h-6 rounded-full transition-colors ${
-                        showNextStepsPanel ? 'bg-blue-600' : 'bg-gray-300'
-                      }`}>
-                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                          showNextStepsPanel ? 'translate-x-4' : 'translate-x-0'
-                        }`} />
-                      </div>
+              <div 
+                className="flex items-center gap-3"
+                style={{ 
+                  visibility: isLiveMode ? 'visible' : 'hidden',
+                  minWidth: '400px' // 固定幅を確保してレイアウトシフトを防ぐ
+                }}
+              >
+                <span className="text-xs text-gray-500">表示/非表示切り替え：</span>
+                {/* ネクストステップトグル */}
+                <label className="flex items-center gap-2 cursor-pointer" title="ネクストステップパネルの表示/非表示を切り替えます">
+                  <span className="text-sm text-gray-700 whitespace-nowrap">📝 ネクストステップ</span>
+                  <div className="relative flex-shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={showNextStepsPanel}
+                      onChange={(e) => setShowNextStepsPanel(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <div className={`w-10 h-6 rounded-full transition-colors ${
+                      showNextStepsPanel ? 'bg-blue-600' : 'bg-gray-300'
+                    }`}>
+                      <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
+                        showNextStepsPanel ? 'translate-x-4' : 'translate-x-0'
+                      }`} />
                     </div>
-                  </label>
-                  
-                  {/* リサーチトグル */}
-                  <label className="flex items-center gap-2 cursor-pointer" title="リサーチパネルの表示/非表示を切り替えます">
-                    <span className="text-sm text-gray-700">🔍 リサーチ</span>
-                    <div className="relative">
-                      <input
-                        type="checkbox"
-                        checked={showResearchPanel}
-                        onChange={(e) => setShowResearchPanel(e.target.checked)}
-                        className="sr-only"
-                      />
-                      <div className={`w-10 h-6 rounded-full transition-colors ${
-                        showResearchPanel ? 'bg-green-600' : 'bg-gray-300'
-                      }`}>
-                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                          showResearchPanel ? 'translate-x-4' : 'translate-x-0'
-                        }`} />
-                      </div>
+                  </div>
+                </label>
+                
+                {/* リサーチトグル */}
+                <label className="flex items-center gap-2 cursor-pointer" title="リサーチパネルの表示/非表示を切り替えます">
+                  <span className="text-sm text-gray-700 whitespace-nowrap">🔍 リサーチ</span>
+                  <div className="relative flex-shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={showResearchPanel}
+                      onChange={(e) => setShowResearchPanel(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <div className={`w-10 h-6 rounded-full transition-colors ${
+                      showResearchPanel ? 'bg-green-600' : 'bg-gray-300'
+                    }`}>
+                      <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
+                        showResearchPanel ? 'translate-x-4' : 'translate-x-0'
+                      }`} />
                     </div>
-                  </label>
-                </div>
-              )}
+                  </div>
+                </label>
+              </div>
               
               {displayMeeting && (
                 <>

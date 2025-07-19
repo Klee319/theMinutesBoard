@@ -1779,7 +1779,7 @@ ${transcripts.length > 0 ? `【音声入力中の内容】\n${transcripts.join('
     })
     
     const result = await enhancedService.generateResearch(
-      query,
+      question,
       {
         systemPrompt: RESEARCH_ASSISTANT_PROMPT,
         currentTopicSummary,
@@ -1790,7 +1790,7 @@ ${transcripts.length > 0 ? `【音声入力中の内容】\n${transcripts.join('
           transcriptsCount: meeting.transcripts.length
         },
         differenceTranscripts,
-        enableWebSearch,
+        enableWebSearch: settings.enableWebSearch ?? true,
         maxTokens: API_CONSTANTS.MAX_TOKENS.CONTENT_GENERATION,
         temperature: 0.7
       },
