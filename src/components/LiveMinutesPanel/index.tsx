@@ -238,20 +238,24 @@ const LiveMinutesPanel = React.memo(function LiveMinutesPanel({
       <div className="flex-shrink-0 flex items-center justify-between p-4 border-b bg-gray-50 h-16 min-h-[64px]">
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-semibold text-gray-900">📝 議事録（実況）</h3>
-          {isRecording && autoUpdateInterval > 0 && nextUpdateTime && (
-            <div className="flex items-center gap-2 text-xs text-gray-600">
-              {isAutoUpdating ? (
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 border border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                  <span>自動更新中...</span>
-                </div>
-              ) : (
-                <span>
-                  次回更新: {Math.max(0, Math.floor((nextUpdateTime.getTime() - Date.now()) / 1000))}秒後
-                </span>
-              )}
-            </div>
-          )}
+          <div 
+            className="flex items-center gap-2 text-xs text-gray-600"
+            style={{ 
+              visibility: isRecording && autoUpdateInterval > 0 && nextUpdateTime ? 'visible' : 'hidden',
+              minWidth: '150px' // 最小幅を確保してレイアウトシフトを防ぐ
+            }}
+          >
+            {isAutoUpdating ? (
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 border border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                <span>自動更新中...</span>
+              </div>
+            ) : (
+              <span>
+                次回更新: {nextUpdateTime ? Math.max(0, Math.floor((nextUpdateTime.getTime() - Date.now()) / 1000)) : 0}秒後
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
