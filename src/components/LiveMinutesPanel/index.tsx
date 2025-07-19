@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, startTransition } from 'react'
 import { Meeting } from '@/types'
 import { logger } from '@/utils/logger'
 import { formatMarkdownToHTML } from '@/utils/markdown'
@@ -14,7 +14,7 @@ interface LiveMinutesPanelProps {
   onToggleResearchPanel?: (show: boolean) => void
 }
 
-export default function LiveMinutesPanel({
+const LiveMinutesPanel = React.memo(function LiveMinutesPanel({
   meeting,
   isGenerating,
   isLocked,
@@ -79,7 +79,7 @@ export default function LiveMinutesPanel({
 
   // 議題の抽出と解析
   const topics = useMemo(() => {
-    if (!minutes) return []
+    if (!minutes || typeof minutes !== 'string') return []
     
     const topicRegex = /## \[(\d{2}:\d{2})\] (.+?) ▼\n\n### 要約: (.+)\n([\s\S]*?)(?=\n---\n\n## |\n---\n\n\*最終更新|$)/g
     const extractedTopics: Array<{
@@ -147,19 +147,35 @@ export default function LiveMinutesPanel({
 
   useEffect(() => {
     try {
-      if (meeting?.minutes) {
+      if (meeting?.minutes && meeting.minutes.content) {
         const content = meeting.minutes.content
         logger.info('[LiveMinutesPanel] Meeting minutes content:', content)
         logger.info('[LiveMinutesPanel] Meeting minutes metadata:', meeting.minutes.metadata)
-        setMinutes(content)
+        startTransition(() => {
+          setMinutes(content)
+        })
         
-        // 会議開始時刻の抽出
-        const startTimeMatch = content.match(/開始時刻: (\d{2}:\d{2})/)
+        // 会議開始時刻の抽出（日付+時刻形式にも対応）
+        const startTimeMatch = content.match(/開始時刻: (.+)/)
         if (startTimeMatch && !meetingStartTime) {
-          const [hours, minutes] = startTimeMatch[1].split(':').map(Number)
-          const startTime = new Date()
-          startTime.setHours(hours, minutes, 0, 0)
-          setMeetingStartTime(startTime)
+          try {
+            // まず完全な日時形式を試す
+            const parsedTime = new Date(startTimeMatch[1])
+            if (!isNaN(parsedTime.getTime())) {
+              setMeetingStartTime(parsedTime)
+            } else {
+              // HH:MM形式の場合は今日の日付で設定
+              const timeMatch = startTimeMatch[1].match(/(\d{2}):(\d{2})/)
+              if (timeMatch) {
+                const [, hours, minutes] = timeMatch
+                const startTime = new Date()
+                startTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
+                setMeetingStartTime(startTime)
+              }
+            }
+          } catch (error) {
+            logger.error('Failed to parse start time:', error)
+          }
         }
         
         // ライブダイジェストの抽出
@@ -179,16 +195,25 @@ export default function LiveMinutesPanel({
               const statementsText = statementsMatch[1]
               const statementLines = statementsText.match(/^- (.+?): (.+)$/gm) || []
               statementLines.forEach(line => {
-                const match = line.match(/^- (.+?): (.+)$/)
-                if (match) {
-                  statements.push({ speaker: match[1], content: match[2] })
+                // lineが文字列であることを確認
+                if (typeof line === 'string') {
+                  const match = line?.match(/^- (.+?): (.+)$/)
+                  if (match && match[1] && match[2]) {
+                    statements.push({ speaker: match[1], content: match[2] })
+                  }
+                } else {
+                  logger.warn('Invalid line in statementLines:', line)
                 }
               })
             }
             
-            setLiveDigest({ summary, details, statements })
+            startTransition(() => {
+              setLiveDigest({ summary, details, statements })
+            })
           } else {
-            setLiveDigest(null)
+            startTransition(() => {
+              setLiveDigest(null)
+            })
           }
         } catch (error) {
           logger.error('Failed to extract live digest:', error)
@@ -210,7 +235,7 @@ export default function LiveMinutesPanel({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-shrink-0 flex items-center justify-between p-4 border-b bg-gray-50">
+      <div className="flex-shrink-0 flex items-center justify-between p-4 border-b bg-gray-50 h-16 min-h-[64px]">
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-semibold text-gray-900">📝 議事録（実況）</h3>
           {isRecording && autoUpdateInterval > 0 && nextUpdateTime && (
@@ -329,7 +354,7 @@ export default function LiveMinutesPanel({
                           <div 
                             className="prose prose-sm max-w-none text-gray-800"
                             dangerouslySetInnerHTML={{ 
-                              __html: formatMarkdownToHTML(topic.content)
+                              __html: formatMarkdownToHTML(topic.content || '')
                                 .replace(/<h3>/g, '<h3 class="text-md font-semibold mt-3 mb-2 text-gray-800">')
                                 .replace(/<li>/g, '<li class="ml-4 mb-1">')
                                 .replace(/<ul>/g, '<ul class="list-disc pl-5 mb-3">')
@@ -388,4 +413,6 @@ export default function LiveMinutesPanel({
       )}
     </div>
   )
-}
+})
+
+export default LiveMinutesPanel

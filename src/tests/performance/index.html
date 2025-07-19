@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>パフォーマンステスト - theMinutesBoard</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 20px;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .test-section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #f9f9f9;
+    }
+    .running {
+      background: #fff3cd;
+    }
+    .passed {
+      background: #d4edda;
+    }
+    .failed {
+      background: #f8d7da;
+    }
+    .result {
+      margin: 10px 0;
+      padding: 10px;
+      background: white;
+      border-radius: 4px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+    }
+    pre {
+      background: #f1f1f1;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+    .progress {
+      width: 100%;
+      height: 20px;
+      background: #e9ecef;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+    .progress-bar {
+      height: 100%;
+      background: #007bff;
+      transition: width 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>theMinutesBoard パフォーマンステスト</h1>
+    
+    <div class="test-section">
+      <h2>テスト制御</h2>
+      <button id="runAllTests" onclick="runAllTests()">全テスト実行</button>
+      <button id="downloadReport" onclick="downloadReport()" disabled>レポートダウンロード</button>
+    </div>
+
+    <div id="testProgress" class="test-section" style="display: none;">
+      <h3>進捗状況</h3>
+      <div class="progress">
+        <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+      </div>
+      <p id="progressText">0 / 5 テスト完了</p>
+    </div>
+
+    <div id="test1" class="test-section">
+      <h3>1. 議事録生成時間テスト</h3>
+      <p>目標: 500発言の議事録を15秒以内に生成</p>
+      <div class="result" id="result1"></div>
+    </div>
+
+    <div id="test2" class="test-section">
+      <h3>2. 3時間会議シミュレーション</h3>
+      <p>360発言の処理とメモリ使用量の監視</p>
+      <div class="result" id="result2"></div>
+    </div>
+
+    <div id="test3" class="test-section">
+      <h3>3. メモリ使用量の継続的監視</h3>
+      <p>メモリリークの検出</p>
+      <div class="result" id="result3"></div>
+    </div>
+
+    <div id="test4" class="test-section">
+      <h3>4. CPU使用率測定</h3>
+      <p>各種操作のCPU負荷測定</p>
+      <div class="result" id="result4"></div>
+    </div>
+
+    <div id="test5" class="test-section">
+      <h3>5. バッテリー消費量への影響</h3>
+      <p>30分間の継続使用によるバッテリー消費</p>
+      <div class="result" id="result5"></div>
+    </div>
+
+    <div id="reportSection" class="test-section" style="display: none;">
+      <h3>テストレポート</h3>
+      <pre id="reportContent"></pre>
+    </div>
+  </div>
+
+  <script type="module">
+    import { runPerformanceTests } from './performance-test.js';
+    import { PerformanceReportGenerator } from './performance-report.js';
+
+    let testResults = null;
+
+    window.runAllTests = async function() {
+      const runButton = document.getElementById('runAllTests');
+      const downloadButton = document.getElementById('downloadReport');
+      const progressSection = document.getElementById('testProgress');
+      
+      runButton.disabled = true;
+      downloadButton.disabled = true;
+      progressSection.style.display = 'block';
+      
+      // テストセクションをリセット
+      for (let i = 1; i <= 5; i++) {
+        const section = document.getElementById(`test${i}`);
+        section.className = 'test-section';
+        document.getElementById(`result${i}`).innerHTML = 'テスト実行中...';
+      }
+      
+      let completedTests = 0;
+      const totalTests = 5;
+      
+      const updateProgress = () => {
+        completedTests++;
+        const percentage = (completedTests / totalTests) * 100;
+        document.getElementById('progressBar').style.width = `${percentage}%`;
+        document.getElementById('progressText').textContent = `${completedTests} / ${totalTests} テスト完了`;
+      };
+      
+      try {
+        // テスト1: 議事録生成時間
+        document.getElementById('test1').className = 'test-section running';
+        const result1 = await runTest1();
+        document.getElementById('test1').className = result1.passed ? 'test-section passed' : 'test-section failed';
+        updateProgress();
+        
+        // テスト2: 3時間会議シミュレーション
+        document.getElementById('test2').className = 'test-section running';
+        const result2 = await runTest2();
+        document.getElementById('test2').className = result2.passed ? 'test-section passed' : 'test-section failed';
+        updateProgress();
+        
+        // テスト3: メモリ使用量監視
+        document.getElementById('test3').className = 'test-section running';
+        const result3 = await runTest3();
+        document.getElementById('test3').className = result3.passed ? 'test-section passed' : 'test-section failed';
+        updateProgress();
+        
+        // テスト4: CPU使用率
+        document.getElementById('test4').className = 'test-section running';
+        const result4 = await runTest4();
+        document.getElementById('test4').className = 'test-section passed';
+        updateProgress();
+        
+        // テスト5: バッテリー影響（スキップ可能）
+        document.getElementById('test5').className = 'test-section running';
+        const result5 = await runTest5();
+        document.getElementById('test5').className = 'test-section passed';
+        updateProgress();
+        
+        // 結果をまとめる
+        testResults = {
+          minutesGeneration: result1,
+          threeHourMeeting: result2,
+          memoryUsage: result3,
+          cpuUsage: result4,
+          batteryImpact: result5
+        };
+        
+        // レポート生成
+        const generator = new PerformanceReportGenerator();
+        const report = generator.generateReport(testResults);
+        document.getElementById('reportContent').textContent = report;
+        document.getElementById('reportSection').style.display = 'block';
+        
+      } catch (error) {
+        console.error('テスト実行エラー:', error);
+        alert('テスト実行中にエラーが発生しました: ' + error.message);
+      } finally {
+        runButton.disabled = false;
+        downloadButton.disabled = false;
+      }
+    };
+    
+    window.downloadReport = function() {
+      if (!testResults) return;
+      
+      const generator = new PerformanceReportGenerator();
+      const report = generator.generateReport(testResults);
+      
+      const blob = new Blob([report], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `performance-report-${new Date().toISOString().split('T')[0]}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    
+    async function runTest1() {
+      const suite = new (await import('./performance-test.js')).PerformanceTestSuite();
+      const result = await suite.testMinutesGenerationTime();
+      
+      const html = `
+        <p><strong>結果: ${result.passed ? '✅ 合格' : '❌ 不合格'}</strong></p>
+        <p>平均生成時間: ${result.averageTime.toFixed(2)}秒</p>
+        <p>最大生成時間: ${result.maxTime.toFixed(2)}秒</p>
+        <ul>
+          ${result.details.map(d => `<li>${d}</li>`).join('')}
+        </ul>
+      `;
+      document.getElementById('result1').innerHTML = html;
+      return result;
+    }
+    
+    async function runTest2() {
+      const suite = new (await import('./performance-test.js')).PerformanceTestSuite();
+      const result = await suite.test3HourMeetingSimulation();
+      
+      const formatBytes = (bytes) => {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+      };
+      
+      const html = `
+        <p><strong>結果: ${result.passed ? '✅ 合格' : '❌ 不合格'}</strong></p>
+        <p>トランスクリプト数: ${result.transcriptCount}件</p>
+        <p>初期メモリ: ${formatBytes(result.memoryUsage.initial)}</p>
+        <p>ピークメモリ: ${formatBytes(result.memoryUsage.peak)}</p>
+        <p>最終メモリ: ${formatBytes(result.memoryUsage.final)}</p>
+        <ul>
+          ${result.details.map(d => `<li>${d}</li>`).join('')}
+        </ul>
+      `;
+      document.getElementById('result2').innerHTML = html;
+      return result;
+    }
+    
+    async function runTest3() {
+      const suite = new (await import('./performance-test.js')).PerformanceTestSuite();
+      const result = await suite.testMemoryUsageContinuous();
+      
+      const html = `
+        <p><strong>結果: ${result.passed ? '✅ 合格' : '❌ 不合格'}</strong></p>
+        <p>メモリリーク: ${result.leakDetected ? '⚠️ 検出' : '✅ なし'}</p>
+        <p>測定回数: ${result.measurements.length}回</p>
+      `;
+      document.getElementById('result3').innerHTML = html;
+      return result;
+    }
+    
+    async function runTest4() {
+      const suite = new (await import('./performance-test.js')).PerformanceTestSuite();
+      const result = await suite.testCPUUsage();
+      
+      const html = `
+        <p>平均CPU時間: ${result.averageCPU.toFixed(2)}ms</p>
+        <p>ピークCPU時間: ${result.peakCPU.toFixed(2)}ms</p>
+        <ul>
+          ${result.details.map(d => `<li>${d}</li>`).join('')}
+        </ul>
+      `;
+      document.getElementById('result4').innerHTML = html;
+      return result;
+    }
+    
+    async function runTest5() {
+      const suite = new (await import('./performance-test.js')).PerformanceTestSuite();
+      const result = await suite.testBatteryImpact();
+      
+      let html;
+      if (result.supported && result.batteryLevel) {
+        html = `
+          <p>開始時: ${result.batteryLevel.start.toFixed(1)}%</p>
+          <p>終了時: ${result.batteryLevel.end.toFixed(1)}%</p>
+          <p>消費量: ${result.batteryLevel.consumed.toFixed(1)}%</p>
+        `;
+      } else {
+        html = `<p>Battery Status APIがサポートされていないため、測定不可</p>`;
+      }
+      
+      document.getElementById('result5').innerHTML = html;
+      return result;
+    }
+  </script>
+</body>
+</html>

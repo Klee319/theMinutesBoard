@@ -1,3 +1,12 @@
+/* ダークモードスタイルのインポート */
+@import './dark-mode.css';
+
+/* アクセシビリティスタイルのインポート */
+@import './accessibility.css';
+
+/* パフォーマンス最適化スタイルのインポート */
+@import './performance.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -9,6 +18,34 @@
   
   body {
     @apply antialiased;
+  }
+  
+  /* スクリーンリーダー専用クラス */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+  
+  /* フォーカス時のみ表示（スキップリンク用） */
+  .sr-only-focusable:focus {
+    position: absolute;
+    width: auto;
+    height: auto;
+    padding: 0.5rem 1rem;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+    z-index: 9999;
+    background: white;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
   }
 }
 

@@ -10,7 +10,16 @@
     "build:content": "node --experimental-modules node_modules/vite/bin/vite.js build --config vite.config.content.mjs",
     "preview": "node --experimental-modules node_modules/vite/bin/vite.js preview",
     "test": "vitest",
-    "lint": "tsc --noEmit"
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "lint": "tsc --noEmit && eslint src/**/*.{ts,tsx}",
+    "lint:fix": "eslint src/**/*.{ts,tsx} --fix",
+    "format": "prettier --write src/**/*.{ts,tsx,js,jsx}",
+    "format:check": "prettier --check src/**/*.{ts,tsx,js,jsx}",
+    "prepare": "husky"
   },
   "keywords": [],
   "author": "",
@@ -18,32 +27,59 @@
   "dependencies": {
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
+    "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.5.1",
     "autoprefixer": "^10.4.21",
+    "lucide-react": "^0.525.0",
     "postcss": "^8.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-window": "^1.8.11",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.8.3",
     "vite": "^5.4.19"
   },
   "devDependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@playwright/test": "^1.54.1",
     "@prisma/client": "^6.8.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/chrome": "^0.0.326",
     "@types/node": "^24.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.37.0",
+    "@typescript-eslint/parser": "^8.37.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/ui": "^3.2.4",
     "better-sqlite3": "^11.10.0",
     "canvas": "^3.1.0",
+    "eslint": "^9.31.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "husky": "^9.1.7",
     "jsdom": "^26.1.0",
+    "lint-staged": "^15.5.2",
+    "prettier": "^3.6.2",
     "prisma": "^6.8.2",
+    "typescript": "^5.8.3",
     "vite-plugin-raw": "^1.0.3",
     "vite-plugin-static-copy": "^3.0.0",
     "vite-plugin-web-extension": "^4.4.3",
     "vitest": "^3.2.0",
     "zustand": "^5.0.5"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "src/**/*.{js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
   },
   "description": ""
 }

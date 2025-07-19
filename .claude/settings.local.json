@@ -26,7 +26,13 @@
       "Bash(pkill:*)",
       "Bash(python3:*)",
       "Bash(claude:*)",
-      "Bash(gemini:*)"
+      "Bash(gemini:*)",
+      "Bash(chmod:*)",
+      "Bash(zip:*)",
+      "Bash(tar:*)",
+      "WebFetch(domain:reactjs.org)",
+      "WebFetch(domain:legacy.reactjs.org)",
+      "WebFetch(domain:react.dev)"
     ],
     "deny": []
   },

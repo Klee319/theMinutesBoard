@@ -2,6 +2,8 @@ import { Transcript, Minutes, UserSettings, Meeting, NextStep } from '@/types'
 import { MINUTES_GENERATION_PROMPT, NEXTSTEPS_GENERATION_PROMPT, LIVE_MINUTES_GENERATION_PROMPT, HISTORY_MINUTES_GENERATION_PROMPT } from '@/system-prompts'
 import { logger } from '@/utils/logger'
 import { TIMING_CONSTANTS, API_CONSTANTS } from '../../constants'
+import { AI_SERVICE_CONFIG } from '@/constants/config'
+import { requestOptimizer } from './request-optimizer'
 
 export abstract class BaseAIService {
   protected apiKey: string
@@ -37,6 +39,42 @@ export abstract class BaseAIService {
     const japaneseChars = (text.match(/[\u4e00-\u9faf\u3040-\u309f\u30a0-\u30ff]/g) || []).length
     const englishWords = (text.match(/[a-zA-Z]+/g) || []).length
     return Math.ceil(japaneseChars * 0.5 + englishWords)
+  }
+
+  // キャッシュ付きの議事録生成
+  async generateMinutesWithCache(
+    transcripts: Transcript[], 
+    settings: UserSettings,
+    meetingInfo?: { startTime?: Date; endTime?: Date },
+    promptType?: 'live' | 'history' | 'default'
+  ): Promise<Minutes> {
+    // キャッシュキーの生成（トランスクリプトの最初と最後のIDを使用）
+    const cacheKey = requestOptimizer.generateCacheKey('generateMinutes', {
+      firstId: transcripts[0]?.id,
+      lastId: transcripts[transcripts.length - 1]?.id,
+      count: transcripts.length,
+      promptType,
+      provider: settings.aiProvider
+    })
+    
+    // キャッシュチェック
+    const cached = requestOptimizer.getCachedResponse<Minutes>(cacheKey)
+    if (cached) {
+      logger.info('Using cached minutes generation result')
+      return cached
+    }
+    
+    // リトライ付きで実行
+    const result = await requestOptimizer.withRetry(
+      () => this.generateMinutes(transcripts, settings, meetingInfo, promptType),
+      this.maxRetries,
+      this.retryDelay
+    )
+    
+    // 結果をキャッシュ
+    requestOptimizer.setCachedResponse(cacheKey, result)
+    
+    return result
   }
 
   abstract generateMinutes(
@@ -101,8 +139,8 @@ export abstract class BaseAIService {
     logger.debug(`formatTranscriptsEnhanced: Processing ${transcripts.length} transcripts`)
     
     // フォーマット前にサイズを確認
-    if (transcripts.length > 1000) {
-      console.warn(`formatTranscriptsEnhanced: Large number of transcripts (${transcripts.length})`);
+    if (transcripts.length > AI_SERVICE_CONFIG.MAX_TRANSCRIPTS_FOR_PROMPT) {
+      logger.warn(`formatTranscriptsEnhanced: Large number of transcripts (${transcripts.length})`);
     }
     
     // デバッグログ: 最初と最後のトランスクリプトの内容を確認
@@ -129,8 +167,8 @@ export abstract class BaseAIService {
       
       if (currentTranscript && 
           currentTranscript.speaker === transcript.speaker &&
-          currentTime - prevTime < 30000) {
-        // 30秒以内の同一話者の発言は統合
+          currentTime - prevTime < AI_SERVICE_CONFIG.SAME_SPEAKER_MERGE_TIME) {
+        // 同一話者の発言統合時間内の発言は統合
         currentTranscript.content += ' ' + transcript.content
       } else {
         if (currentTranscript) {
@@ -181,8 +219,8 @@ export abstract class BaseAIService {
     const result = header + transcriptText
     
     // 結果のサイズを確認
-    if (result.length > 200000) { // 200KB以上の場合警告
-      console.warn(`formatTranscriptsEnhanced: Very large formatted output (${(result.length / 1024).toFixed(1)}KB)`);
+    if (result.length > AI_SERVICE_CONFIG.MAX_PROMPT_SIZE) {
+      logger.warn(`formatTranscriptsEnhanced: Very large formatted output (${(result.length / 1024).toFixed(1)}KB)`);
     }
     
     return result
@@ -214,7 +252,7 @@ export abstract class BaseAIService {
     logger.debug(`getEnhancedPrompt: System prompt preview: ${combinedPrompt.substring(0, 200)}...`)
     
     // プロンプトの最大サイズを制限（約200KB - より安全なマージン）
-    const MAX_PROMPT_SIZE = 200000
+    const MAX_PROMPT_SIZE = AI_SERVICE_CONFIG.MAX_PROMPT_SIZE
     
     // 会議時間の計算
     let duration = 0
@@ -287,7 +325,7 @@ export abstract class BaseAIService {
     
     const templateVariables: Record<string, any> = {
       userName: settings?.userName || '不明な参加者',
-      meetingDate: safeGetDate(meetingInfo?.startTime),
+      meetingDate: safeFormatLocaleDateString(meetingInfo?.startTime),
       startTime: safeFormatLocaleString(meetingInfo?.startTime),
       endTime: meetingInfo?.endTime ? safeFormatLocaleString(meetingInfo.endTime) : '',
       participants: participants.join(', '),
@@ -410,6 +448,9 @@ export abstract class BaseAIService {
       currentTime: safeFormatDateTime(new Date()),
     }
     
+    // デバッグ: meetingDateの値を確認
+    logger.debug(`buildNextStepsPrompt: meetingDate = ${templateVariables.meetingDate}, startTime = ${templateVariables.startTime}`)
+    
     // テンプレート変数を置換
     prompt = this.replaceTemplateVariables(prompt, templateVariables)
     
@@ -483,8 +524,6 @@ export abstract class BaseAIService {
       const parsed = JSON.parse(jsonStr)
       return this.processNextStepsData(parsed, meetingId)
     } catch (error) {
-      console.error('Failed to parse NextSteps response:', error)
-      console.error('Original response:', response)
       return []
     }
   }

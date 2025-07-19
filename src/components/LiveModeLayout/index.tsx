@@ -142,7 +142,7 @@ function MobilePanelTabs({
   )
 }
 
-export default function LiveModeLayout({
+const LiveModeLayout = React.memo(function LiveModeLayout({
   meeting,
   isMinutesGenerating,
   onGenerateMinutes,
@@ -547,4 +547,6 @@ export default function LiveModeLayout({
       ))}
     </div>
   )
-}
+})
+
+export default LiveModeLayout

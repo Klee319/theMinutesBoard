@@ -75,7 +75,6 @@ export default function ChatPanel({ meeting, isLiveMode }: ChatPanelProps) {
           setMessages(prev => [...prev, errorMessage])
         }
     } catch (error) {
-      console.error('Error sending message:', error)
       const errorMessage: ChatMessage = {
         id: `msg_${Date.now()}_error`,
         role: 'assistant',

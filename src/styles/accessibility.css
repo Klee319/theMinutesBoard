@@ -1,0 +1,165 @@
+/* WCAG 2.1 AA準拠のカラーコントラスト改善 */
+
+/* 高コントラストのテキスト色 */
+.text-gray-500 {
+  color: #6b7280; /* 4.5:1以上のコントラスト比を確保 */
+}
+
+.text-gray-600 {
+  color: #4b5563; /* より濃い色に調整 */
+}
+
+/* 優先度表示の色（WCAG準拠） */
+.text-yellow-600 {
+  color: #d97706; /* 黄色ではなくオレンジ系に変更 */
+}
+
+.text-red-600 {
+  color: #dc2626;
+}
+
+/* フォーカススタイル（WCAG準拠） */
+*:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+/* ボタンのフォーカススタイル */
+button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* 入力フィールドのフォーカススタイル */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 0;
+  border-color: #2563eb;
+}
+
+/* リンクのフォーカススタイル */
+a:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  text-decoration: underline;
+}
+
+/* スキップリンク */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: #2563eb;
+  color: white;
+  padding: 8px 16px;
+  text-decoration: none;
+  border-radius: 0 0 4px 0;
+  font-weight: 600;
+  z-index: 100;
+  transform: translateY(-100%);
+  transition: transform 0.2s ease;
+  will-change: transform;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* 高コントラストモード対応 */
+@media (prefers-contrast: high) {
+  .text-gray-500,
+  .text-gray-600 {
+    color: #1f2937;
+  }
+  
+  .text-yellow-600 {
+    color: #92400e;
+  }
+  
+  *:focus-visible {
+    outline-width: 3px;
+  }
+}
+
+/* ダークモードでのコントラスト調整 */
+@media (prefers-color-scheme: dark) {
+  .text-gray-500 {
+    color: #9ca3af;
+  }
+  
+  .text-gray-600 {
+    color: #d1d5db;
+  }
+  
+  .text-yellow-600 {
+    color: #fbbf24;
+  }
+}
+
+/* 動きの削減設定対応 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .spinner {
+    animation: none;
+    border-color: currentColor;
+  }
+}
+
+/* エラー・成功メッセージのアクセシビリティ */
+.error-message {
+  color: #991b1b;
+  background-color: #fee2e2;
+  border: 1px solid #dc2626;
+  padding: 12px;
+  border-radius: 4px;
+}
+
+.success-message {
+  color: #14532d;
+  background-color: #dcfce7;
+  border: 1px solid #16a34a;
+  padding: 12px;
+  border-radius: 4px;
+}
+
+/* アイコンのアクセシビリティ */
+[aria-hidden="true"] {
+  display: inline-block;
+}
+
+/* 必須フィールドのマーキング */
+.required::after {
+  content: " *";
+  color: #dc2626;
+  font-weight: bold;
+}
+
+/* フォームヘルプテキスト */
+.form-help-text {
+  color: #4b5563;
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+/* 無効化された要素 */
+:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

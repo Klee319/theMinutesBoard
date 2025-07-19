@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, startTransition } from 'react'
 import { Meeting, NextStep } from '@/types'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
@@ -8,12 +8,13 @@ interface NextStepsBoardProps {
   meetings: Meeting[]
 }
 
-export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
+const NextStepsBoard = React.memo(function NextStepsBoard({ meetings }: NextStepsBoardProps) {
   const [allNextSteps, setAllNextSteps] = useState<Array<NextStep & { meetingId: string; meetingTitle: string }>>([])
   const [filter, setFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed' | 'deleted'>('pending')
   const [isLoading, setIsLoading] = useState(false)
 
-  useEffect(() => {
+  // useMemoでネクストステップの収集とソートを最適化
+  const sortedSteps = React.useMemo(() => {
     // すべての会議からネクストステップを収集
     const steps: Array<NextStep & { meetingId: string; meetingTitle: string }> = []
     
@@ -54,8 +55,12 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
       return 0
     })
     
-    setAllNextSteps(steps)
+    return steps
   }, [meetings])
+
+  useEffect(() => {
+    setAllNextSteps(sortedSteps)
+  }, [sortedSteps])
 
   const extractMeetingTopic = (content: string): string => {
     // 会議の目的を優先的に抽出
@@ -76,20 +81,32 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
     return '議題情報なし'
   }
 
-  const filteredSteps = allNextSteps.filter(step => {
-    switch (filter) {
-      case 'pending':
-        return step.status === 'pending'
-      case 'in_progress':
-        return step.status === 'in_progress'
-      case 'completed':
-        return step.status === 'completed'
-      case 'deleted':
-        return step.status === 'deleted'
-      default:
-        return step.status !== 'deleted'
-    }
-  })
+  const filteredSteps = React.useMemo(() => {
+    return allNextSteps.filter(step => {
+      switch (filter) {
+        case 'pending':
+          return step.status === 'pending'
+        case 'in_progress':
+          return step.status === 'in_progress'
+        case 'completed':
+          return step.status === 'completed'
+        case 'deleted':
+          return step.status === 'deleted'
+        default:
+          return step.status !== 'deleted'
+      }
+    })
+  }, [allNextSteps, filter])
+
+  // カウントをメモ化
+  const statusCounts = React.useMemo(() => ({
+    pending: allNextSteps.filter(s => s.status === 'pending').length,
+    in_progress: allNextSteps.filter(s => s.status === 'in_progress').length,
+    completed: allNextSteps.filter(s => s.status === 'completed').length,
+    deleted: allNextSteps.filter(s => s.status === 'deleted').length,
+    all: allNextSteps.filter(s => s.status !== 'deleted').length,
+    isPending: allNextSteps.filter(s => s.isPending).length
+  }), [allNextSteps])
 
   const handleStatusChange = async (stepId: string, meetingId: string, newStatus: 'pending' | 'in_progress' | 'completed' | 'deleted', isPendingUpdate?: boolean) => {
     try {
@@ -116,25 +133,27 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
       })
       
       if (response.success) {
-        // ローカル状態を更新
-        setAllNextSteps(prev => prev.map(s => 
-          s.id === stepId && s.meetingId === meetingId 
-            ? { ...s, ...updates, updatedAt: new Date() }
-            : s
-        ))
-        
-        // 新しい状態に応じてフィルターを自動切り替え
-        switch (newStatus) {
-          case 'pending':
-            setFilter('pending')
-            break
-          case 'in_progress':
-            setFilter('in_progress')
-            break
-          case 'completed':
-            setFilter('completed')
-            break
-        }
+        // ローカル状態を更新をstartTransitionでラップ
+        startTransition(() => {
+          setAllNextSteps(prev => prev.map(s => 
+            s.id === stepId && s.meetingId === meetingId 
+              ? { ...s, ...updates, updatedAt: new Date() }
+              : s
+          ))
+          
+          // 新しい状態に応じてフィルターを自動切り替え
+          switch (newStatus) {
+            case 'pending':
+              setFilter('pending')
+              break
+            case 'in_progress':
+              setFilter('in_progress')
+              break
+            case 'completed':
+              setFilter('completed')
+              break
+          }
+        })
       }
     } catch (error) {
       logger.error('Error updating next step status:', error)
@@ -257,10 +276,12 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
       })
       
       if (response.success) {
-        // ローカル状態から削除
-        setAllNextSteps(prev => prev.filter(s => 
-          !(s.id === stepId && s.meetingId === meetingId)
-        ))
+        // ローカル状態から削除をstartTransitionでラップ
+        startTransition(() => {
+          setAllNextSteps(prev => prev.filter(s => 
+            !(s.id === stepId && s.meetingId === meetingId)
+          ))
+        })
       }
     } catch (error) {
       logger.error('Error deleting next step permanently:', error)
@@ -283,7 +304,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                 : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
             }`}
           >
-            未実行 ({allNextSteps.filter(s => s.status === 'pending').length})
+            未実行 ({statusCounts.pending})
           </button>
           <button
             onClick={() => setFilter('in_progress')}
@@ -293,7 +314,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                 : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
             }`}
           >
-            実行中 ({allNextSteps.filter(s => s.status === 'in_progress').length})
+            実行中 ({statusCounts.in_progress})
           </button>
           <button
             onClick={() => setFilter('completed')}
@@ -303,7 +324,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                 : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
             }`}
           >
-            完了済み ({allNextSteps.filter(s => s.status === 'completed').length})
+            完了済み ({statusCounts.completed})
           </button>
           <button
             onClick={() => setFilter('all')}
@@ -313,7 +334,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                 : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
             }`}
           >
-            すべて ({allNextSteps.filter(s => s.status !== 'deleted').length})
+            すべて ({statusCounts.all})
           </button>
           <button
             onClick={() => setFilter('deleted')}
@@ -323,7 +344,7 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
                 : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
             }`}
           >
-            🗑️ ゴミ箱 ({allNextSteps.filter(s => s.status === 'deleted').length})
+            🗑️ ゴミ箱 ({statusCounts.deleted})
           </button>
         </div>
       </div>
@@ -494,23 +515,25 @@ export default function NextStepsBoard({ meetings }: NextStepsBoardProps) {
       <div className="p-4 border-t bg-gray-50">
         <div className="grid grid-cols-4 gap-4 text-center">
           <div>
-            <p className="text-2xl font-bold text-gray-600">{allNextSteps.filter(s => s.status === 'pending').length}</p>
+            <p className="text-2xl font-bold text-gray-600">{statusCounts.pending}</p>
             <p className="text-xs text-gray-600">未実行</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-orange-600">{allNextSteps.filter(s => s.status === 'in_progress').length}</p>
+            <p className="text-2xl font-bold text-orange-600">{statusCounts.in_progress}</p>
             <p className="text-xs text-gray-600">実行中</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-green-600">{allNextSteps.filter(s => s.status === 'completed').length}</p>
+            <p className="text-2xl font-bold text-green-600">{statusCounts.completed}</p>
             <p className="text-xs text-gray-600">完了済み</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-red-600">{allNextSteps.filter(s => s.isPending).length}</p>
+            <p className="text-2xl font-bold text-red-600">{statusCounts.isPending}</p>
             <p className="text-xs text-gray-600">要確認</p>
           </div>
         </div>
       </div>
     </div>
   )
-}
+})
+
+export default NextStepsBoard

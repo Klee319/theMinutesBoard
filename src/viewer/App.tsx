@@ -1,14 +1,37 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, Suspense } from 'react'
 import { Meeting, Minutes } from '@/types'
-import NextStepsBoard from '@/components/NextStepsBoard'
-import MeetingNextSteps from '@/components/MeetingNextSteps'
-import ResizablePanel from '@/components/ResizablePanel'
-import LiveModeLayout from '@/components/LiveModeLayout'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
 import { formatMarkdownToHTML } from '@/utils/markdown'
 import { extractMeetingTopic } from '@/utils/meeting-utils'
+import { useKeyboardShortcuts, KeyboardShortcut } from '@/hooks/useKeyboardShortcuts'
+import { useDarkMode } from '@/hooks/useDarkMode'
+import { DarkModeToggle } from '@/components/DarkModeToggle'
+import { ScreenReaderAnnouncer } from '@/components/ScreenReaderAnnouncer'
+import { lazyLoadComponent, LoadingFallback } from '@/utils/lazy-load'
+
+// 重いコンポーネントを動的インポート
+const NextStepsBoard = lazyLoadComponent(
+  () => import('@/components/NextStepsBoard'),
+  'NextStepsBoard'
+)
+const MeetingNextSteps = lazyLoadComponent(
+  () => import('@/components/MeetingNextSteps'),
+  'MeetingNextSteps'
+)
+const ResizablePanel = lazyLoadComponent(
+  () => import('@/components/ResizablePanel'),
+  'ResizablePanel'
+)
+const LiveModeLayout = lazyLoadComponent(
+  () => import('@/components/LiveModeLayout'),
+  'LiveModeLayout'
+)
+const KeyboardShortcutsHelp = lazyLoadComponent(
+  () => import('@/components/KeyboardShortcutsHelp').then(m => ({ default: m.KeyboardShortcutsHelp })),
+  'KeyboardShortcutsHelp'
+)
 
 function App() {
   const [currentMeeting, setCurrentMeeting] = useState<Meeting | null>(null)
@@ -23,6 +46,92 @@ function App() {
   const [showResearchPanel, setShowResearchPanel] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
+  const { isDarkMode, toggleDarkMode } = useDarkMode()
+
+  // キーボードショートカットの定義
+  const shortcuts: KeyboardShortcut[] = [
+    {
+      key: '/',
+      description: '会議を検索',
+      handler: () => {
+        const searchInput = document.querySelector('input[type="text"]') as HTMLInputElement
+        if (searchInput) {
+          searchInput.focus()
+        }
+      }
+    },
+    {
+      key: '?',
+      description: 'ショートカットヘルプを表示',
+      handler: () => setShowShortcutsHelp(true)
+    },
+    {
+      key: 'Escape',
+      description: '閉じる/キャンセル',
+      handler: () => {
+        setShowShortcutsHelp(false)
+        setIsDownloadDropdownOpen(false)
+      }
+    },
+    {
+      key: 'l',
+      description: 'ライブモードに切り替え',
+      handler: () => {
+        if (currentMeeting) {
+          setIsLiveMode(true)
+        }
+      }
+    },
+    {
+      key: 'h',
+      description: '履歴タブに切り替え',
+      handler: () => {
+        setIsLiveMode(false)
+        setCurrentTab('history')
+      }
+    },
+    {
+      key: 't',
+      description: 'ToDoタブに切り替え',
+      handler: () => {
+        setIsLiveMode(false)
+        setCurrentTab('nextsteps')
+      }
+    },
+    {
+      key: 'd',
+      ctrl: true,
+      description: '議事録をダウンロード',
+      handler: () => {
+        const meeting = selectedMeeting || currentMeeting
+        if (meeting?.minutes) {
+          setIsDownloadDropdownOpen(!isDownloadDropdownOpen)
+        }
+      }
+    },
+    {
+      key: 'n',
+      description: 'ネクストステップパネルを切り替え',
+      handler: () => setShowNextStepsPanel(!showNextStepsPanel)
+    },
+    {
+      key: 'r',
+      description: 'リサーチパネルを切り替え',
+      handler: () => setShowResearchPanel(!showResearchPanel)
+    },
+    {
+      key: 's',
+      description: '記録を停止',
+      handler: () => {
+        if (isLiveMode && currentMeeting) {
+          stopRecording()
+        }
+      }
+    }
+  ]
+
+  useKeyboardShortcuts(shortcuts)
 
   useEffect(() => {
     logger.debug('Initial useEffect - loading data')
@@ -258,17 +367,32 @@ function App() {
     if (!meeting?.minutes) return
 
     let content = ''
-    let filename = `minutes_${new Date(meeting.startTime).toISOString().split('T')[0]}`
+    let filename = 'minutes'
+    
+    // 安全な日付処理
+    try {
+      const date = new Date(meeting.startTime)
+      if (!isNaN(date.getTime())) {
+        filename = `minutes_${date.toISOString().split('T')[0]}`
+      } else {
+        // フォールバック: 現在の日付を使用
+        filename = `minutes_${new Date().toISOString().split('T')[0]}`
+      }
+    } catch (error) {
+      // エラー時のフォールバック
+      filename = `minutes_${new Date().toISOString().split('T')[0]}`
+    }
+    
     let mimeType = ''
 
     switch (format) {
       case 'markdown':
-        content = meeting.minutes.content
+        content = meeting.minutes?.content || ''
         filename += '.md'
         mimeType = 'text/markdown'
         break
       case 'txt':
-        content = meeting.minutes.content.replace(/[#*`]/g, '')
+        content = (meeting.minutes?.content || '').replace(/[#*`]/g, '')
         filename += '.txt'
         mimeType = 'text/plain'
         break
@@ -292,9 +416,17 @@ function App() {
   const displayMeeting = selectedMeeting || currentMeeting
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* スクリーンリーダー用アナウンサー */}
+      <ScreenReaderAnnouncer />
+      
+      {/* スキップリンク */}
+      <a href="#main-content" className="skip-link sr-only-focusable">
+        メインコンテンツへスキップ
+      </a>
+      
       {/* ヘッダー */}
-      <div className="bg-white shadow-sm border-b">
+      <header className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700" role="banner">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -451,31 +583,52 @@ function App() {
                   )}
                 </>
               )}
+              
+              {/* ダークモードトグル */}
+              <DarkModeToggle 
+                isDarkMode={isDarkMode} 
+                onToggle={toggleDarkMode} 
+              />
+              
+              {/* ヘルプボタン */}
+              <button
+                onClick={() => setShowShortcutsHelp(true)}
+                className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                title="キーボードショートカット (?)">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                    d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
       <div className="max-w-full mx-auto p-2 md:p-4">
         {/* ネクストステップタブの全画面表示 */}
         {!isLiveMode && currentTab === 'nextsteps' && (
           <div className="h-[calc(100vh-120px)]">
-            <NextStepsBoard meetings={allMeetings} />
+            <Suspense fallback={<LoadingFallback />}>
+              <NextStepsBoard meetings={allMeetings} />
+            </Suspense>
           </div>
         )}
 
         {/* ライブモード - 3パネル縦積みレイアウト */}
         {isLiveMode && (
           <ErrorBoundary>
-            <LiveModeLayout
-              meeting={currentMeeting}
-              isMinutesGenerating={isMinutesGenerating}
-              onGenerateMinutes={generateMinutes}
-              onStopRecording={stopRecording}
-              isRecording={isRecording}
-              showNextStepsPanel={showNextStepsPanel}
-              showResearchPanel={showResearchPanel}
-            />
+            <Suspense fallback={<LoadingFallback />}>
+              <LiveModeLayout
+                meeting={currentMeeting}
+                isMinutesGenerating={isMinutesGenerating}
+                onGenerateMinutes={generateMinutes}
+                onStopRecording={stopRecording}
+                isRecording={isRecording}
+                showNextStepsPanel={showNextStepsPanel}
+                showResearchPanel={showResearchPanel}
+              />
+            </Suspense>
           </ErrorBoundary>
         )}
 
@@ -483,14 +636,15 @@ function App() {
         {!isLiveMode && currentTab === 'history' && (
           <div className="flex gap-4 h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
             {/* 履歴サイドバー - 終了した会議のみ表示 */}
-            <ResizablePanel
-              position="left"
-              defaultWidth={280}
-              minWidth={200}
-              maxWidth={400}
-              className="flex-shrink-0"
-            >
-              <div className="bg-white rounded-lg shadow-sm p-4 h-full overflow-y-auto">
+            <Suspense fallback={<LoadingFallback />}>
+              <ResizablePanel
+                position="left"
+                defaultWidth={280}
+                minWidth={200}
+                maxWidth={400}
+                className="flex-shrink-0"
+              >
+                <div className="bg-white rounded-lg shadow-sm p-4 h-full overflow-y-auto">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">会議履歴</h2>
                 <div className="space-y-2">
                   {allMeetings.filter(m => m.endTime).length === 0 ? (
@@ -535,7 +689,8 @@ function App() {
                   )}
                 </div>
               </div>
-            </ResizablePanel>
+              </ResizablePanel>
+            </Suspense>
 
             {/* メインコンテンツ */}
             <div className="flex-1 flex gap-4">
@@ -585,7 +740,7 @@ function App() {
 
                     {/* 議事録コンテンツ */}
                     <div className="p-6 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-                      {displayMeeting.minutes ? (
+                      {displayMeeting.minutes && displayMeeting.minutes.content ? (
                         <div className="prose prose-lg max-w-none">
                           <div dangerouslySetInnerHTML={{ 
                             __html: formatMarkdownToHTML(displayMeeting.minutes.content) 
@@ -612,22 +767,33 @@ function App() {
 
               {/* 会議固有のネクストステップパネル（履歴モード） */}
               {!isLiveMode && selectedMeeting && showNextStepsPanel && (
-                <ResizablePanel
-                  position="right"
-                  defaultWidth={380}
-                  minWidth={300}
-                  maxWidth={500}
-                >
-                  <div className="bg-white rounded-lg shadow-sm h-full">
-                    <MeetingNextSteps meeting={selectedMeeting} />
-                  </div>
-                </ResizablePanel>
+                <Suspense fallback={<LoadingFallback />}>
+                  <ResizablePanel
+                    position="right"
+                    defaultWidth={380}
+                    minWidth={300}
+                    maxWidth={500}
+                  >
+                    <div className="bg-white rounded-lg shadow-sm h-full">
+                      <MeetingNextSteps meeting={selectedMeeting} />
+                    </div>
+                  </ResizablePanel>
+                </Suspense>
               )}
 
             </div>
           </div>
         )}
       </div>
+      
+      {/* キーボードショートカットヘルプ */}
+      <Suspense fallback={<LoadingFallback />}>
+        <KeyboardShortcutsHelp
+          isOpen={showShortcutsHelp}
+          onClose={() => setShowShortcutsHelp(false)}
+          shortcuts={shortcuts}
+        />
+      </Suspense>
     </div>
   )
 }

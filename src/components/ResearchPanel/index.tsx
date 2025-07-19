@@ -63,7 +63,14 @@ export default function ResearchPanel({ meeting, isLocked = false }: ResearchPan
     try {
       const result = await chrome.storage.local.get([`research_${meetingId}`])
       const results = result[`research_${meetingId}`] || []
-      setResearchResults(results)
+      
+      // timestampをDateオブジェクトに変換
+      const convertedResults = results.map((r: any) => ({
+        ...r,
+        timestamp: r.timestamp ? new Date(r.timestamp) : new Date()
+      }))
+      
+      setResearchResults(convertedResults)
     } catch (error) {
       logger.error('Failed to load research results:', error)
     }
@@ -183,39 +190,37 @@ export default function ResearchPanel({ meeting, isLocked = false }: ResearchPan
     <div className="h-full flex flex-col">
       {/* ヘッダー */}
       <div className="flex-shrink-0 p-4 border-b bg-gray-50">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">🔍 リサーチ</h2>
           
-          {/* Web検索トグル */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600">Web検索</span>
-            <button
-              onClick={handleWebSearchToggle}
-              disabled={isLocked}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                isWebSearchEnabled ? 'bg-blue-600' : 'bg-gray-200'
-              } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  isWebSearchEnabled ? 'translate-x-6' : 'translate-x-1'
-                }`}
+          <div className="flex items-center gap-4">
+            {/* Web検索トグル */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Web検索</span>
+              <button
+                onClick={handleWebSearchToggle}
+                disabled={isLocked}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  isWebSearchEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    isWebSearchEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+            
+            {/* 音声ボタン */}
+            {meeting && (
+              <ResearchVoiceButton
+                meetingId={meeting.id}
+                onNewMessage={handleVoiceMessage}
+                disabled={isLocked}
               />
-            </button>
+            )}
           </div>
-        </div>
-        
-        {/* タブとボタン */}
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">🔍 リサーチ</h3>
-          
-          {meeting && (
-            <ResearchVoiceButton
-              meetingId={meeting.id}
-              onNewMessage={handleVoiceMessage}
-              disabled={isLocked}
-            />
-          )}
         </div>
       </div>
 

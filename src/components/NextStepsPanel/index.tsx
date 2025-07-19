@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, startTransition } from 'react'
 import { NextStep } from '@/types'
+import { announceToScreenReader, generateId } from '@/utils/accessibility'
 import './styles.css'
 
 interface NextStepsPanelProps {
@@ -42,9 +43,12 @@ export const NextStepsPanel: React.FC<NextStepsPanelProps> = ({
 
   const handleEditSave = () => {
     if (editingId && editingTask.trim()) {
-      onUpdateNextStep(editingId, { task: editingTask.trim() })
-      setEditingId(null)
-      setEditingTask('')
+      startTransition(() => {
+        onUpdateNextStep(editingId, { task: editingTask.trim() })
+        setEditingId(null)
+        setEditingTask('')
+        announceToScreenReader('タスクが更新されました')
+      })
     }
   }
 
@@ -60,9 +64,13 @@ export const NextStepsPanel: React.FC<NextStepsPanelProps> = ({
       'in_progress': 'completed',
       'completed': 'pending'
     }
-    onUpdateNextStep(nextStep.id, { 
-      status: statusFlow[nextStep.status],
-      isPending: statusFlow[nextStep.status] === 'pending'
+    const newStatus = statusFlow[nextStep.status]
+    startTransition(() => {
+      onUpdateNextStep(nextStep.id, { 
+        status: newStatus,
+        isPending: newStatus === 'pending'
+      })
+      announceToScreenReader(`ステータスが${getStatusLabel(newStatus)}に変更されました`)
     })
   }
 
@@ -100,32 +108,39 @@ export const NextStepsPanel: React.FC<NextStepsPanelProps> = ({
     }
   }
 
+  const panelId = useRef(generateId('nextsteps-panel')).current
+  const listId = useRef(generateId('nextsteps-list')).current
+
   return (
-    <div className="nextsteps-panel">
+    <section className="nextsteps-panel" role="region" aria-labelledby={`${panelId}-heading`}>
       <div className="nextsteps-header">
-        <h3 className="text-lg font-semibold">ネクストステップ</h3>
+        <h3 id={`${panelId}-heading`} className="text-lg font-semibold">ネクストステップ</h3>
         <div className="header-actions">
           <button
             onClick={() => setShowUserPrompt(!showUserPrompt)}
             className="btn-icon"
-            title="プロンプト設定"
+            aria-label="プロンプト設定"
+            aria-expanded={showUserPrompt}
+            aria-controls="user-prompt-section"
           >
-            ⚙️
+            <span aria-hidden="true">⚙️</span>
           </button>
           <button
             onClick={onGenerateNextSteps}
             disabled={isGenerating}
             className="btn-generate"
+            aria-label="ネクストステップを生成"
+            aria-busy={isGenerating}
           >
             {isGenerating ? (
               <>
-                <span className="spinner"></span>
-                生成中...
+                <span className="spinner" aria-hidden="true"></span>
+                <span>生成中...</span>
               </>
             ) : (
               <>
-                <span className="icon">✨</span>
-                生成
+                <span className="icon" aria-hidden="true">✨</span>
+                <span>生成</span>
               </>
             )}
           </button>
@@ -133,51 +148,71 @@ export const NextStepsPanel: React.FC<NextStepsPanelProps> = ({
       </div>
 
       {showUserPrompt && (
-        <div className="user-prompt-section">
+        <div id="user-prompt-section" className="user-prompt-section">
+          <label htmlFor={`${panelId}-prompt-input`} className="sr-only">
+            ネクストステップ生成の追加指示
+          </label>
           <textarea
+            id={`${panelId}-prompt-input`}
             value={localUserPrompt}
             onChange={(e) => setLocalUserPrompt(e.target.value)}
             placeholder="追加の指示を入力（例：技術的なタスクを重視して抽出してください）"
             className="user-prompt-input"
             rows={3}
+            aria-describedby={`${panelId}-prompt-help`}
           />
+          <span id={`${panelId}-prompt-help`} className="sr-only">
+            AIがネクストステップを生成する際の追加の指示を入力できます
+          </span>
           <button
             onClick={handlePromptSubmit}
             className="btn-apply-prompt"
+            aria-label="プロンプトを適用してネクストステップを生成"
           >
             適用して生成
           </button>
         </div>
       )}
 
-      <div className="nextsteps-list">
+      <div className="nextsteps-list" role="list" aria-labelledby={`${panelId}-heading`} id={listId}>
         {sortedNextSteps.length === 0 ? (
-          <div className="empty-state">
+          <div className="empty-state" role="status">
             <p>ネクストステップがありません</p>
             <p className="text-sm text-gray-500">
               会議の内容からタスクを自動抽出します
             </p>
           </div>
         ) : (
-          sortedNextSteps.map((nextStep) => (
+          <>
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              {sortedNextSteps.length}個のネクストステップがあります
+            </div>
+            {sortedNextSteps.map((nextStep) => (
             <div
               key={nextStep.id}
               className={`nextstep-item ${nextStep.isPending ? 'pending' : ''} ${
                 nextStep.status === 'completed' ? 'completed' : ''
               }`}
+              role="listitem"
+              aria-label={`タスク: ${nextStep.task}`}
             >
               <div className="nextstep-main">
                 <button
                   onClick={() => handleStatusToggle(nextStep)}
                   className="status-toggle"
-                  title={getStatusLabel(nextStep.status)}
+                  aria-label={`ステータスを変更: 現在は${getStatusLabel(nextStep.status)}`}
+                  aria-pressed={nextStep.status === 'completed'}
                 >
-                  {getStatusIcon(nextStep.status)}
+                  <span aria-hidden="true">{getStatusIcon(nextStep.status)}</span>
                 </button>
                 
                 {editingId === nextStep.id ? (
-                  <div className="task-edit">
+                  <div className="task-edit" role="group" aria-label="タスク編集">
+                    <label htmlFor={`edit-task-${nextStep.id}`} className="sr-only">
+                      タスク内容を編集
+                    </label>
                     <input
+                      id={`edit-task-${nextStep.id}`}
                       type="text"
                       value={editingTask}
                       onChange={(e) => setEditingTask(e.target.value)}
@@ -187,12 +222,24 @@ export const NextStepsPanel: React.FC<NextStepsPanelProps> = ({
                       }}
                       className="task-input"
                       autoFocus
+                      aria-describedby={`edit-help-${nextStep.id}`}
                     />
-                    <button onClick={handleEditSave} className="btn-save">
-                      ✓
+                    <span id={`edit-help-${nextStep.id}`} className="sr-only">
+                      Enterキーで保存、Escapeキーでキャンセル
+                    </span>
+                    <button 
+                      onClick={handleEditSave} 
+                      className="btn-save"
+                      aria-label="編集を保存"
+                    >
+                      <span aria-hidden="true">✓</span>
                     </button>
-                    <button onClick={handleEditCancel} className="btn-cancel">
-                      ✗
+                    <button 
+                      onClick={handleEditCancel} 
+                      className="btn-cancel"
+                      aria-label="編集をキャンセル"
+                    >
+                      <span aria-hidden="true">✗</span>
                     </button>
                   </div>
                 ) : (
@@ -242,7 +289,8 @@ export const NextStepsPanel: React.FC<NextStepsPanelProps> = ({
                 🗑️
               </button>
             </div>
-          ))
+          ))}
+          </>
         )}
       </div>
 
@@ -259,6 +307,6 @@ export const NextStepsPanel: React.FC<NextStepsPanelProps> = ({
           </span>
         </div>
       </div>
-    </div>
+    </section>
   )
 }

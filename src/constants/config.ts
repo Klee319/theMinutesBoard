@@ -36,13 +36,39 @@ export const API_CONFIG = {
   API_TIMEOUT: 30000, // API呼び出しタイムアウト（ms）
   API_RETRY_COUNT: 3, // API再試行回数
   API_RETRY_DELAY: 1000, // API再試行待機時間（ms）
+  
+  // タイムアウト設定（API別）
+  TIMEOUT_BY_API: {
+    VALIDATE_KEY: 5000, // APIキー検証（ms）
+    GENERATE_MINUTES: 60000, // 議事録生成（ms）
+    GENERATE_NEXTSTEPS: 30000, // ネクストステップ生成（ms）
+    CHAT_MESSAGE: 30000, // チャットメッセージ（ms）
+    RESEARCH: 45000, // リサーチ（ms）
+  },
+  
+  // 各プロバイダーのレート制限（requests/minute）
+  RATE_LIMITS: {
+    OPENAI: 50,
+    CLAUDE: 30,
+    GEMINI: 60,
+    OPENROUTER: 40,
+  },
 } as const
 
 // ストレージ設定
 export const STORAGE_CONFIG = {
   MAX_STORAGE_BYTES: 4 * 1024 * 1024, // 4MB
   STORAGE_WARNING_THRESHOLD: 0.9, // 90%で警告
+  STORAGE_CRITICAL_THRESHOLD: 0.95, // 95%で緊急クリーンアップ
   MAX_TRANSCRIPTS_PER_MEETING: 10000, // 会議あたりの最大字幕数
+  MAX_MEETINGS: 100, // 最大保存会議数
+} as const
+
+// AIサービス設定
+export const AI_SERVICE_CONFIG = {
+  MAX_PROMPT_SIZE: 200000, // 最大プロンプトサイズ（バイト）
+  MAX_TRANSCRIPTS_FOR_PROMPT: 1000, // プロンプトに含める最大トランスクリプト数
+  SAME_SPEAKER_MERGE_TIME: 30000, // 同一話者発言統合時間（ms）
 } as const
 
 // UI設定

@@ -4,6 +4,11 @@
  * @returns HTML形式のテキスト
  */
 export function formatMarkdownToHTML(markdown: string): string {
+  // nullまたはundefinedチェック
+  if (!markdown) {
+    return ''
+  }
+  
   let html = markdown
   
   // 折りたたみマーカーを含むセクションヘッダーを処理

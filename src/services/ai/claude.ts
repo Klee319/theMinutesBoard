@@ -52,7 +52,6 @@ export class ClaudeService extends BaseAIService {
           const liveData = JSON.parse(rawContent)
           content = this.convertLiveDataToMarkdown(liveData)
         } catch (error) {
-          console.error('Failed to parse live minutes JSON:', error)
           // パースに失敗した場合は元のコンテンツを使用
           content = rawContent
         }
@@ -74,7 +73,6 @@ export class ClaudeService extends BaseAIService {
       
       return minutes
     } catch (error) {
-      console.error('Failed to generate minutes with Claude:', error)
       throw new Error('議事録の生成に失敗しました')
     }
   }
@@ -141,7 +139,6 @@ export class ClaudeService extends BaseAIService {
       const data = await response.json()
       return data.content[0]?.text || ''
     } catch (error) {
-      console.error('Failed to generate content with Claude:', error)
       throw new Error('コンテンツの生成に失敗しました')
     }
   }
@@ -185,7 +182,6 @@ export class ClaudeService extends BaseAIService {
       
       return this.parseNextStepsResponse(content, meeting.id)
     } catch (error) {
-      console.error('Failed to generate next steps with Claude:', error)
       throw new Error('ネクストステップの生成に失敗しました')
     }
   }
@@ -249,7 +245,6 @@ export class ClaudeService extends BaseAIService {
       const data = await response.json()
       return data.content[0]?.text || ''
     } catch (error) {
-      console.error('Failed to send chat message with Claude:', error)
       throw new Error('チャットメッセージの送信に失敗しました')
     }
   }
@@ -283,7 +278,6 @@ export class ClaudeService extends BaseAIService {
       const data = await response.json()
       return data.content[0]?.text || ''
     } catch (error) {
-      console.error('Failed to generate text with Claude:', error)
       throw new Error('テキストの生成に失敗しました')
     }
   }

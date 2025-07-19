@@ -1,3 +1,6 @@
+// A/Bテスト関連の型をインポート
+export * from './ab-test'
+
 export interface Transcript {
   id: string
   speaker: string
@@ -50,6 +53,8 @@ export interface UserSettings {
   autoUpdateInterval: number // 自動更新間隔（分）、0はOFF
   exportFormat: ExportFormat
   userName?: string // 拡張機能利用者名を追加
+  abTestEnabled?: boolean // A/Bテスト有効化
+  abTestConfig?: ABTestConfig // A/Bテスト設定
 }
 
 export type AIProvider = 'gemini' | 'openai' | 'claude' | 'openrouter'
@@ -65,7 +70,7 @@ export interface AIModel {
   }
 }
 
-export type ExportFormat = 'markdown' | 'pdf' | 'txt' | 'json'
+export type ExportFormat = 'markdown' | 'pdf' | 'txt' | 'json' | 'csv'
 
 export interface RateLimitStatus {
   remaining: number

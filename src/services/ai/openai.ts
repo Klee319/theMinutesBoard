@@ -59,7 +59,6 @@ export class OpenAIService extends BaseAIService {
       
       return minutes
     } catch (error) {
-      console.error('Failed to generate minutes with OpenAI:', error)
       throw new Error('議事録の生成に失敗しました')
     }
   }
@@ -113,7 +112,6 @@ export class OpenAIService extends BaseAIService {
       const data = await response.json()
       return data.choices[0]?.message?.content || ''
     } catch (error) {
-      console.error('Failed to generate content with OpenAI:', error)
       throw new Error('コンテンツの生成に失敗しました')
     }
   }
@@ -178,7 +176,6 @@ export class OpenAIService extends BaseAIService {
       const data = await response.json()
       return data.choices[0]?.message?.content || ''
     } catch (error) {
-      console.error('Failed to send chat message with OpenAI:', error)
       throw new Error('チャットメッセージの送信に失敗しました')
     }
   }
@@ -211,7 +208,6 @@ export class OpenAIService extends BaseAIService {
       const data = await response.json()
       return data.choices[0]?.message?.content || ''
     } catch (error) {
-      console.error('Failed to generate text with OpenAI:', error)
       throw new Error('テキストの生成に失敗しました')
     }
   }
@@ -248,7 +244,6 @@ export class OpenAIService extends BaseAIService {
       
       return this.parseNextStepsResponse(content, meeting.id)
     } catch (error) {
-      console.error('Failed to generate next steps with OpenAI:', error)
       throw new Error('ネクストステップの生成に失敗しました')
     }
   }

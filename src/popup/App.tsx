@@ -137,14 +137,17 @@ function App() {
     if (!isRecording) {
       try {
         const captionStatus = await ChromeErrorHandler.sendMessageToTab(tab.id, { type: 'CHECK_CAPTIONS' })
-        if (!captionStatus?.hasCaptions) {
+        if (!captionStatus?.success || !captionStatus?.hasCaptions) {
           setCaptionError(true)
           // エラー表示を3秒後に自動的に消す
           setTimeout(() => setCaptionError(false), 3000)
           return
         }
       } catch (error) {
-        // エラーの場合は静かに続行（字幕チェックが失敗しても記録は可能）
+        // 字幕チェックが失敗した場合もエラーとして扱う
+        setCaptionError(true)
+        setTimeout(() => setCaptionError(false), 3000)
+        return
       }
     }
     
@@ -158,7 +161,13 @@ function App() {
       })
       .catch(error => {
         console.error('Error sending message:', error)
-        alert(ChromeErrorHandler.getUserFriendlyMessage(error))
+        
+        // コンテキストエラーの場合は特別なメッセージ
+        if (ChromeErrorHandler.isExtensionContextError(error)) {
+          alert('拡張機能との接続が失われました。このポップアップを閉じて、もう一度開いてください。')
+        } else {
+          alert(ChromeErrorHandler.getUserFriendlyMessage(error))
+        }
       })
   }
   

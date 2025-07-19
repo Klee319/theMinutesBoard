@@ -225,3 +225,107 @@
 .no-minutes p {
   margin-bottom: 16px;
 }
+
+/* 仮想スクロール用のスタイル */
+.virtualized-minutes {
+  height: 100%;
+}
+
+.minutes-section {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.section-header {
+  padding: 12px 24px;
+  font-weight: 600;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s;
+}
+
+.section-header.expandable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+.section-header.expandable::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #f3f4f6;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.section-header.expandable:hover::before {
+  opacity: 1;
+}
+
+.section-header.expandable:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.section-header.level-1 {
+  font-size: 20px;
+  background-color: #f9fafb;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.section-header.level-2 {
+  font-size: 18px;
+  padding-left: 32px;
+}
+
+.section-header.level-3 {
+  font-size: 16px;
+  padding-left: 40px;
+}
+
+.section-header.level-4,
+.section-header.level-5,
+.section-header.level-6 {
+  font-size: 14px;
+  padding-left: 48px;
+}
+
+.expand-icon {
+  font-size: 12px;
+  color: #6b7280;
+  transition: transform 0.2s;
+}
+
+.section-content {
+  padding: 8px 24px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #374151;
+}
+
+.section-header.level-2 + .section-content {
+  padding-left: 48px;
+}
+
+.section-header.level-3 + .section-content {
+  padding-left: 56px;
+}
+
+.section-content strong {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.section-content code {
+  background-color: #f3f4f6;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}

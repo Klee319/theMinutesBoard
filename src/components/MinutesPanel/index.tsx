@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Minutes, ExportFormat } from '@/types'
 import { storageService } from '@/services/storage'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
+import { announceToScreenReader, useFocusTrap, useEscapeKey, generateId } from '@/utils/accessibility'
+import { VirtualizedMinutes } from './VirtualizedMinutes'
 import './styles.css'
 
 interface MinutesPanelProps {
@@ -15,8 +17,34 @@ export const MinutesPanel: React.FC<MinutesPanelProps> = ({ meetingId, onClose }
   const [isMinimized, setIsMinimized] = useState(false)
   const [position, setPosition] = useState({ x: window.innerWidth / 2 - 300, y: 100 })
   const [isDragging, setIsDragging] = useState(false)
+  const [useVirtualScroll, setUseVirtualScroll] = useState(true)
+  const [contentDimensions, setContentDimensions] = useState({ width: 552, height: 500 })
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const panelId = useRef(generateId('minutes-panel')).current
+  
+  // フォーカストラップとEscapeキーハンドラー
+  const focusTrapRef = useFocusTrap(!isMinimized)
+  useEscapeKey(onClose, !isMinimized)
+  
+  // コンテンツエリアのサイズを監視
+  useEffect(() => {
+    if (contentRef.current) {
+      const updateDimensions = () => {
+        if (contentRef.current) {
+          setContentDimensions({
+            width: contentRef.current.offsetWidth,
+            height: Math.min(500, window.innerHeight - 250)
+          })
+        }
+      }
+      
+      updateDimensions()
+      window.addEventListener('resize', updateDimensions)
+      return () => window.removeEventListener('resize', updateDimensions)
+    }
+  }, [minutes, isMinimized])
   
   useEffect(() => {
     loadMinutes()
@@ -38,7 +66,6 @@ export const MinutesPanel: React.FC<MinutesPanelProps> = ({ meetingId, onClose }
         setMinutes(meeting.minutes)
       }
     } catch (error) {
-      console.error('Failed to load minutes:', error)
     } finally {
       setIsLoading(false)
     }
@@ -53,9 +80,9 @@ export const MinutesPanel: React.FC<MinutesPanelProps> = ({ meetingId, onClose }
       a.download = `minutes_${new Date().toISOString().split('T')[0]}.${format}`
       a.click()
       URL.revokeObjectURL(url)
+      announceToScreenReader(`議事録を${format}形式でエクスポートしました`)
     } catch (error) {
-      console.error('Export failed:', error)
-      alert('エクスポートに失敗しました')
+      announceToScreenReader('エクスポートに失敗しました', 'assertive')
     }
   }
   
@@ -105,49 +132,66 @@ export const MinutesPanel: React.FC<MinutesPanelProps> = ({ meetingId, onClose }
         setIsLoading(true)
       })
       .catch(error => {
-        console.error('Failed to regenerate minutes:', error)
         alert(ChromeErrorHandler.getUserFriendlyMessage(error))
       })
   }
   
   return (
     <div 
-      ref={panelRef}
+      ref={(el) => {
+        panelRef.current = el
+        if (focusTrapRef.current && el) {
+          focusTrapRef.current = el
+        }
+      }}
       className={`minutes-panel ${isMinimized ? 'minimized' : ''}`}
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
       onMouseDown={handleMouseDown}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`${panelId}-title`}
+      aria-describedby={`${panelId}-content`}
     >
       <div className="panel-header">
-        <h3 className="panel-title">議事録</h3>
+        <h3 id={`${panelId}-title`} className="panel-title">議事録</h3>
         <div className="panel-controls">
           <button 
             onClick={() => setIsMinimized(!isMinimized)}
             className="control-button"
-            title={isMinimized ? '最大化' : '最小化'}
+            aria-label={isMinimized ? 'パネルを最大化' : 'パネルを最小化'}
+            aria-expanded={!isMinimized}
           >
-            {isMinimized ? '□' : '_'}
+            <span aria-hidden="true">{isMinimized ? '□' : '_'}</span>
           </button>
           <button 
             onClick={onClose}
             className="control-button close"
-            title="閉じる"
+            aria-label="パネルを閉じる"
           >
-            ×
+            <span aria-hidden="true">×</span>
           </button>
         </div>
       </div>
       
       {!isMinimized && (
-        <div className="panel-body">
+        <div className="panel-body" id={`${panelId}-content`}>
           {isLoading ? (
-            <div className="loading">
-              <div className="spinner"></div>
+            <div className="loading" role="status" aria-live="polite">
+              <div className="spinner" aria-hidden="true"></div>
               <p>議事録を生成中...</p>
             </div>
           ) : minutes ? (
             <>
-              <div className="minutes-content">
-                <div dangerouslySetInnerHTML={{ __html: formatMarkdown(minutes.content) }} />
+              <div className="minutes-content" role="article" ref={contentRef}>
+                {useVirtualScroll ? (
+                  <VirtualizedMinutes 
+                    minutes={minutes}
+                    height={contentDimensions.height}
+                    width={contentDimensions.width}
+                  />
+                ) : (
+                  <div dangerouslySetInnerHTML={{ __html: formatMarkdown(minutes.content) }} />
+                )}
               </div>
               <div className="panel-footer">
                 <div className="footer-info">
@@ -157,15 +201,38 @@ export const MinutesPanel: React.FC<MinutesPanelProps> = ({ meetingId, onClose }
                   )}
                 </div>
                 <div className="footer-actions">
-                  <button onClick={handleRegenerate} className="action-button">
+                  <button 
+                    onClick={() => setUseVirtualScroll(!useVirtualScroll)}
+                    className="action-button"
+                    aria-label={useVirtualScroll ? "通常表示に切り替え" : "仮想スクロールに切り替え"}
+                    title={useVirtualScroll ? "通常表示に切り替え" : "仮想スクロールに切り替え"}
+                  >
+                    {useVirtualScroll ? "📜" : "⚡"}
+                  </button>
+                  <button 
+                    onClick={handleRegenerate} 
+                    className="action-button"
+                    aria-label="議事録を再生成"
+                  >
                     再生成
                   </button>
-                  <div className="export-dropdown">
-                    <button className="action-button">エクスポート ▼</button>
-                    <div className="dropdown-content">
-                      <button onClick={() => handleExport('markdown')}>Markdown</button>
-                      <button onClick={() => handleExport('txt')}>テキスト</button>
+                  <div className="export-dropdown" role="group" aria-label="エクスポートオプション">
+                    <button 
+                      className="action-button"
+                      aria-label="エクスポートメニューを開く"
+                      aria-haspopup="true"
+                    >エクスポート ▼</button>
+                    <div className="dropdown-content" role="menu">
+                      <button 
+                        onClick={() => handleExport('markdown')}
+                        role="menuitem"
+                      >Markdown</button>
+                      <button 
+                        onClick={() => handleExport('txt')}
+                        role="menuitem"
+                      >テキスト</button>
                       <button onClick={() => handleExport('json')}>JSON</button>
+                      <button onClick={() => handleExport('csv')}>CSV</button>
                     </div>
                   </div>
                 </div>
@@ -186,6 +253,11 @@ export const MinutesPanel: React.FC<MinutesPanelProps> = ({ meetingId, onClose }
 }
 
 function formatMarkdown(content: string): string {
+  // contentがundefinedまたはnullの場合は空文字列を返す
+  if (!content) {
+    return ''
+  }
+  
   return content
     .replace(/^### (.*$)/gim, '<h3>$1</h3>')
     .replace(/^## (.*$)/gim, '<h2>$1</h2>')

@@ -1,0 +1,117 @@
+/* パフォーマンス最適化のためのスタイル */
+
+/* will-changeプロパティの適切な使用 */
+.toast {
+  will-change: transform, opacity;
+}
+
+.ai-assistant-button {
+  will-change: transform;
+}
+
+.spinner {
+  will-change: transform;
+}
+
+.expand-icon {
+  will-change: transform;
+}
+
+/* アニメーション要素の最適化 */
+.minutes-panel {
+  will-change: left, top;
+}
+
+.minutes-panel.minimized {
+  will-change: auto;
+}
+
+/* ドラッグ中のみwill-changeを適用 */
+.dragging {
+  will-change: transform;
+}
+
+/* モーダルやパネルの最適化 */
+.meeting-history-modal,
+.chat-panel,
+.research-panel {
+  will-change: opacity;
+}
+
+/* トランジション最適化 */
+.transition-optimized {
+  transform: translateZ(0); /* GPU層の作成 */
+  backface-visibility: hidden; /* 裏面の描画を無効化 */
+}
+
+/* リフロー削減のための固定サイズ */
+.fixed-dimensions {
+  contain: layout style;
+}
+
+/* スクロールパフォーマンスの向上 */
+.scroll-optimized {
+  will-change: scroll-position;
+  -webkit-overflow-scrolling: touch; /* iOS向け */
+}
+
+/* ホバー効果の最適化 */
+.hover-optimized {
+  position: relative;
+  overflow: hidden;
+}
+
+.hover-optimized::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.05);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.hover-optimized:hover::before {
+  opacity: 1;
+}
+
+/* フォントレンダリングの最適化 */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 画像最適化 */
+img {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+/* レイヤー作成の明示的な指定 */
+.create-layer {
+  transform: translateZ(0);
+}
+
+/* アニメーション終了後のクリーンアップ */
+.animation-cleanup {
+  animation-fill-mode: none;
+}
+
+/* GPUメモリの節約 */
+@media (hover: none) {
+  /* タッチデバイスではホバー効果を無効化 */
+  .hover-optimized::before {
+    display: none;
+  }
+  
+  /* will-changeの削減 */
+  .toast,
+  .ai-assistant-button,
+  .expand-icon {
+    will-change: auto;
+  }
+}

@@ -26,6 +26,7 @@ class TranscriptCapture {
   private cleanupIntervals: Set<number> = new Set()
   private captionCheckInterval: NodeJS.Timer | null = null
   private lastCaptionCheckTime = Date.now()
+  private captionStatusInterval: NodeJS.Timer | null = null
   
   // メモリ管理用の変数
   private transcriptBuffer: any[] = []
@@ -72,7 +73,7 @@ class TranscriptCapture {
     notification.innerHTML = `
       <div style="display: flex; align-items: center; gap: 10px;">
         <span>拡張機能との接続が切断されました</span>
-        <button onclick="location.reload()" style="
+        <button id="reload-extension-btn" style="
           background: white;
           color: #dc2626;
           border: 1px solid #dc2626;
@@ -84,6 +85,14 @@ class TranscriptCapture {
       </div>
     `
     document.body.appendChild(notification)
+    
+    // イベントリスナーを追加
+    const reloadBtn = notification.querySelector('#reload-extension-btn')
+    if (reloadBtn) {
+      reloadBtn.addEventListener('click', () => {
+        location.reload()
+      })
+    }
     
     // 10秒後に自動的に削除
     setTimeout(() => notification.remove(), 10000)
@@ -117,12 +126,20 @@ class TranscriptCapture {
   }
   
   private init() {
+    // Google Meetページにいる場合は通訷がアクティブとみなす
+    this.isCallActive = true
+    
     this.injectUI()
     this.setupMessageListener()
     this.waitForCaptions()
     this.setupCallStatusMonitoring()
     this.setupParticipantsMonitoring()
     this.checkExistingSession()
+    
+    // 初期化完了後にボタン状態を更新
+    setTimeout(() => {
+      this.updateRecordingButtonState()
+    }, 1000)
   }
   
   private async checkExistingSession() {
@@ -157,7 +174,7 @@ class TranscriptCapture {
           btnText.textContent = '記録停止'
           logger.debug('UI updated: button text changed to "記録停止"')
         }
-        // ボタンが無効化されていないことを確認
+        // 記録中は常にボタンを有効化
         toggleBtn.removeAttribute('disabled')
       } else {
         toggleBtn.classList.remove('recording')
@@ -165,18 +182,24 @@ class TranscriptCapture {
           btnText.textContent = '記録開始'
           logger.debug('UI updated: button text changed to "記録開始"')
         }
-        // ボタンが無効化されていないことを確認
-        toggleBtn.removeAttribute('disabled')
+        // 記録していない時は字幕の状態をチェック（初期化時を除く）
+        if (this.isCallActive) {
+          this.updateRecordingButtonState()
+        }
       }
     } else {
-      logger.warn('Toggle button not found in updateRecordingUI')
+      logger.debug('Toggle button not found in updateRecordingUI')
     }
     
     if (generateBtn) {
       if (recording) {
         generateBtn.removeAttribute('disabled')
       } else {
-        generateBtn.setAttribute('disabled', 'true')
+        try {
+          generateBtn.setAttribute('disabled', 'true')
+        } catch (error) {
+          logger.error('Failed to set disabled attribute on generateBtn:', error)
+        }
       }
     }
   }
@@ -261,7 +284,7 @@ class TranscriptCapture {
     const generateBtn = document.getElementById('minutes-generate')
     const openTabBtn = document.getElementById('minutes-open-tab')
     
-    toggleBtn?.addEventListener('click', (e) => {
+    toggleBtn?.addEventListener('click', async (e) => {
       e.preventDefault() // デフォルト動作を防ぐ
       e.stopPropagation() // イベントの伝播を停止
       
@@ -271,7 +294,43 @@ class TranscriptCapture {
         logger.debug('Calling stopRecording...')
         this.stopRecording()
       } else {
-        logger.debug('Calling startRecording...')
+        // 記録開始前に字幕の状態を確認
+        logger.debug('Checking captions before starting recording...')
+        
+        // まず字幕ボタンの状態を確認
+        const isCaptionEnabled = this.isCaptionButtonEnabled()
+        if (!isCaptionEnabled) {
+          logger.debug('Caption button is OFF, canceling recording start')
+          this.showNotification('字幕をONにしてから、もう一度記録開始ボタンをクリックしてください。', 'error')
+          this.highlightCaptionButton()
+          // ボタンの状態を確実に元に戻す
+          this.updateRecordingButtonState()
+          return
+        }
+        
+        // 字幕コンテナを探す（複数回試行）
+        let captionsFound = false
+        for (let i = 0; i < 3; i++) {
+          if (this.checkForCaptions(true)) { // forceオプションを追加
+            captionsFound = true
+            break
+          }
+          if (i < 2) {
+            await new Promise(resolve => setTimeout(resolve, 500))
+            logger.debug(`Caption check attempt ${i + 1} failed, retrying...`)
+          }
+        }
+        
+        if (!captionsFound || !this.captionsContainer) {
+          logger.debug('Captions container not found, canceling recording start')
+          this.showNotification('字幕要素が見つかりません。字幕が正しく表示されていることを確認してください。', 'error')
+          this.highlightCaptionButton()
+          // ボタンの状態を確実に元に戻す
+          this.updateRecordingButtonState()
+          return
+        }
+        
+        logger.debug('Captions found, calling startRecording...')
         this.startRecording()
       }
     })
@@ -514,22 +573,132 @@ class TranscriptCapture {
         clearInterval(checkInterval)
         this.cleanupIntervals.delete(checkInterval)
         logger.info('Captions container found after waiting')
+        // 字幕が見つかったらボタンの状態を更新
+        this.updateRecordingButtonState()
       } else if (attemptCount >= maxAttempts) {
         clearInterval(checkInterval)
         this.cleanupIntervals.delete(checkInterval)
         logger.debug('Captions container not found after maximum attempts')
+        // 字幕が見つからなかったらボタンを無効化
+        this.updateRecordingButtonState()
       } else if (attemptCount % 5 === 0) {
         logger.debug(`Still waiting for captions... (attempt ${attemptCount}/${maxAttempts})`)
+        // 定期的にボタンの状態を更新
+        this.updateRecordingButtonState()
       }
     }, TIMING_CONFIG.CAPTIONS_MAX_WAIT_TIME / 30)
     
     this.cleanupIntervals.add(checkInterval)
   }
   
-  private checkForCaptions() {
+  // 記録開始ボタンの有効/無効を制御する新しいメソッド
+  private updateRecordingButtonState() {
+    const toggleBtn = document.getElementById('minutes-toggle-recording')
+    if (!toggleBtn || this.isRecording) return // 記録中は変更しない
+    
+    // 字幕ボタンの状態を確認
+    const captionStatus = this.getCaptionStatus()
+    
+    // toggleBtnの存在チェック
+    if (!toggleBtn) {
+      logger.error('Toggle button not found in updateCaptionButtonUI')
+      return
+    }
+
+    // デフォルトでボタンを有効化（字幕ボタンが見つからない場合もユーザーが操作できるように）
+    if (captionStatus === 'on' || captionStatus === 'unknown') {
+      toggleBtn.removeAttribute('disabled')
+      try {
+        toggleBtn.setAttribute('title', '記録を開始')
+      } catch (error) {
+        logger.error('Failed to set title attribute on toggleBtn:', error)
+      }
+      // 強制的にスタイルもリセット
+      (toggleBtn as HTMLElement).style.opacity = '1';
+      (toggleBtn as HTMLElement).style.cursor = 'pointer';
+    } else {
+      // 字幕が明確にOFFの場合のみ無効化
+      try {
+        toggleBtn.setAttribute('disabled', 'true')
+        toggleBtn.setAttribute('title', '字幕をONにしてから記録を開始してください')
+      } catch (error) {
+        logger.error('Failed to set attributes on toggleBtn:', error)
+      }
+    }
+  }
+
+  // 字幕の状態を取得（on/off/unknown）
+  private getCaptionStatus(): 'on' | 'off' | 'unknown' {
+    // 1. jsname="r8qRAd"のボタンを最優先で探す
+    const captionButton = document.querySelector('button[jsname="r8qRAd"]')
+    if (captionButton) {
+      const ariaLabel = captionButton.getAttribute('aria-label') || ''
+      const iconElement = captionButton.querySelector('i.google-symbols')
+      const iconText = iconElement?.textContent?.trim() || ''
+      
+      // aria-labelまたはアイコンテキストで判定
+      if (ariaLabel.includes('オンにする') || iconText === 'closed_caption_off') {
+        return 'off'
+      } else if (ariaLabel.includes('オフにする') || iconText === 'closed_caption') {
+        return 'on'
+      }
+    }
+    
+    // 2. その他のセレクタでも探す
+    const captionButtonSelectors = [
+      'button[aria-label*="字幕"]',
+      'button[aria-label*="caption"]',
+      'button[data-tooltip*="字幕"]',
+      'button[data-tooltip*="caption"]'
+    ]
+    
+    for (const selector of captionButtonSelectors) {
+      const element = document.querySelector(selector)
+      if (element) {
+        const ariaLabel = element.getAttribute('aria-label') || ''
+        const dataTooltip = element.getAttribute('data-tooltip') || ''
+        
+        if (ariaLabel.includes('オンにする') || dataTooltip.includes('オンにする')) {
+          return 'off'
+        } else if (ariaLabel.includes('オフにする') || dataTooltip.includes('オフにする')) {
+          return 'on'
+        }
+      }
+    }
+    
+    // 3. 字幕コンテナの存在でも判断
+    const captionContainers = document.querySelectorAll('.a4cQT, [jsname="tgaKEf"], .iOzk7')
+    if (captionContainers.length > 0) {
+      return 'on'
+    }
+    
+    return 'unknown'
+  }
+  
+  // 字幕ボタンがONになっているかを確認するメソッド（後方互換性のため残す）
+  private isCaptionButtonEnabled(): boolean {
+    return this.getCaptionStatus() === 'on'
+  }
+
+  private checkForCaptions(force: boolean = false) {
     const captionSelectors = CAPTION_SELECTORS
     
     logger.debug('Checking for captions with selectors:', captionSelectors)
+    
+    // forceオプションが有効で、字幕ボタンがONの場合は簡略化したチェックを行う
+    if (force && this.isCaptionButtonEnabled()) {
+      logger.debug('Force mode enabled and caption button is ON, using simplified check')
+      
+      // 字幕コンテナの候補を広く探す
+      for (const selector of captionSelectors) {
+        const element = document.querySelector(selector)
+        if (element) {
+          this.captionsContainer = element
+          logger.info('Captions container found with selector (force mode):', selector)
+          return true
+        }
+      }
+    }
     
     // ページ内のすべての字幕関連要素を探す（デバッグ用）
     const debugSelectors = [
@@ -595,25 +764,21 @@ class TranscriptCapture {
       return
     }
     
-    // 字幕コンテナを再度チェック（複数回試行）
-    let captionsFound = false
-    for (let i = 0; i < TIMING_CONFIG.CAPTIONS_RETRY_COUNT; i++) {
-      if (this.checkForCaptions()) {
-        captionsFound = true
-        break
-      }
-      if (i < 2) {
-        // 待機してから再試行（最後の試行では待機しない）
-        await new Promise(resolve => setTimeout(resolve, TIMING_CONFIG.CAPTIONS_RETRY_DELAY))
-        logger.debug(`Caption check attempt ${i + 1} failed, retrying...`)
-      }
-    }
-    
-    if (!captionsFound || !this.captionsContainer) {
-      // 字幕なしでは記録を開始できないことを通知（コンソールログは削除）
+    // 字幕コンテナの最終確認（ボタンクリックハンドラーでもチェック済みだが念のため）
+    if (!this.captionsContainer) {
+      logger.error('Captions container not found in startRecording')
       this.showNotification('字幕を有効にしてから、もう一度記録開始ボタンをクリックしてください。', 'error')
       this.highlightCaptionButton()
-      return // ここで必ずリターンする
+      return
+    }
+    
+    // コンテキストの有効性をチェック
+    const isContextValid = await ChromeErrorHandler.checkContextValidity()
+    if (!isContextValid) {
+      logger.error('Extension context is not available')
+      this.showNotification('拡張機能との接続が失われました。ページを再読み込みしてください。', 'error')
+      this.showReconnectionNotification()
+      return
     }
     
     this.isRecording = true
@@ -634,10 +799,17 @@ class TranscriptCapture {
       logger.debug('Recording started successfully')
     }).catch(error => {
       logger.error('Error sending START_RECORDING:', error)
-      this.showNotification(
-        ChromeErrorHandler.getUserFriendlyMessage(error), 
-        'error'
-      )
+      
+      // コンテキストエラーの場合は特別な処理
+      if (ChromeErrorHandler.isExtensionContextError(error)) {
+        this.showReconnectionNotification()
+      } else {
+        this.showNotification(
+          ChromeErrorHandler.getUserFriendlyMessage(error), 
+          'error'
+        )
+      }
+      
       // 記録状態を元に戻す
       this.isRecording = false
       this.updateRecordingUI(false)
@@ -754,6 +926,9 @@ class TranscriptCapture {
     const currentUrl = window.location.href
     const meetingId = currentUrl.split('/').pop() || ''
     logger.debug('Setting up call status monitoring for URL:', currentUrl, 'Meeting ID:', meetingId)
+    
+    // 字幕の状態を定期的に監視
+    this.startCaptionStatusMonitoring()
     
     // ページが会議画面から離脱したか監視
     const checkUrl = () => {
@@ -1666,7 +1841,7 @@ class TranscriptCapture {
         mimeType = 'text/markdown'
         break
       case 'txt':
-        content = minutes.content.replace(/[#*`]/g, '')
+        content = (minutes.content || '').replace(/[#*`]/g, '')
         filename += '.txt'
         mimeType = 'text/plain'
         break
@@ -1772,6 +1947,33 @@ class TranscriptCapture {
     }, 3000) // 3秒ごとにチェック
   }
   
+  // 字幕の状態を定期的に監視し、ボタンの状態を更新
+  private startCaptionStatusMonitoring() {
+    // 既存の監視をクリア
+    if (this.captionStatusInterval) {
+      clearInterval(this.captionStatusInterval)
+      this.cleanupIntervals.delete(this.captionStatusInterval as unknown as number)
+    }
+    
+    logger.info('[MONITOR DEBUG] Starting caption status monitoring...')
+    
+    // 2秒ごとに字幕状態をチェック
+    this.captionStatusInterval = setInterval(() => {
+      if (!this.isRecording && this.isCallActive) {
+        logger.info('[MONITOR DEBUG] Running periodic check...')
+        this.updateRecordingButtonState()
+      }
+    }, 2000)
+    
+    this.cleanupIntervals.add(this.captionStatusInterval as unknown as number)
+    
+    // 初回チェックを遅延実行（DOMが完全にロードされるまで待つ）
+    setTimeout(() => {
+      logger.info('[MONITOR DEBUG] Running initial check after delay...')
+      this.updateRecordingButtonState()
+    }, 1000)
+  }
+
   private highlightCaptionButton() {
     logger.debug('Looking for caption button...')
     
@@ -1997,6 +2199,12 @@ class TranscriptCapture {
     if (this.captionCheckInterval) {
       clearInterval(this.captionCheckInterval)
       this.captionCheckInterval = null
+    }
+    
+    // 字幕状態監視のクリア
+    if (this.captionStatusInterval) {
+      clearInterval(this.captionStatusInterval)
+      this.captionStatusInterval = null
     }
     
     // メモリ解放

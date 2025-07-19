@@ -24,10 +24,24 @@
 
 ### 3. **AI統合強化**
 - **更新されたサービス**
-  - `src/services/ai/provider-manager.ts` - 改善された抽象化
-  - `src/services/ai/fallback-handler.ts` - フォールバック
-  - `src/services/ai/rate-limiter.ts` - レート制限
-  - `src/services/ai/prompt-optimizer.ts` - 最適化
+  - `src/services/ai/factory.ts` - AIServiceFactory（改善された抽象化）
+  - `src/services/ai/enhanced-ai-service.ts` - フォールバック対応
+  - `src/services/ai/factory.ts` - レート制限機能統合
+  - `src/system-prompts/` - 最適化されたプロンプト
+
+### 4. **A/Bテスト機能**
+- **新規実装**
+  - `src/services/ai/ab-test.ts` - A/Bテストマネージャー
+  - `src/types/ab-test.ts` - A/Bテスト型定義
+  - `src/components/ABTestSettings.tsx` - 設定UI
+  - `src/components/ABTestMetrics.tsx` - メトリクス表示
+
+### 5. **アクセシビリティ対応**
+- **ユーティリティ**
+  - `src/utils/accessibility.ts` - アクセシビリティヘルパー
+  - `src/components/ScreenReaderAnnouncer.tsx` - スクリーンリーダー対応
+- **スタイル**
+  - `src/styles/accessibility.css` - WCAG準拠スタイル
 
 ## テスト成果物
 
@@ -40,6 +54,8 @@
 - `__tests__/integration/export-flow.test.ts`
 - `__tests__/integration/history-management.test.ts`
 - `__tests__/integration/ai-fallback.test.ts`
+- `src/tests/integration/ab-test.test.ts` - A/Bテスト統合テスト
+- `src/tests/integration/accessibility.test.ts` - アクセシビリティテスト
 
 ## UI/UXデザイン
 
@@ -64,6 +80,11 @@
 - `docs/api/export-api.md` - エクスポートAPI
 - `docs/api/history-api.md` - 履歴管理API
 - `docs/api/ai-providers-v2.md` - AI プロバイダーAPI
+- `docs/api-reference.md` - 統合APIリファレンス
+
+### 3. **レビュードキュメント**
+- `docs/security-review.md` - セキュリティレビュー報告書
+- `docs/architecture-review.md` - アーキテクチャレビュー報告書
 
 ## 設定とマイグレーション
 
@@ -74,7 +95,7 @@
 
 ### 2. **マイグレーション**
 - `scripts/migrate-to-indexeddb.js` - データ移行スクリプト
-- `docs/MIGRATION_GUIDE.md` - 移行ガイド
+- `docs/migration-guide.md` - v1.0からv2.0への移行ガイド
 
 ## 品質保証
 

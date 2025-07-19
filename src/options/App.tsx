@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react'
-import { UserSettings, ExportFormat, AIProvider, AIModel } from '@/types'
+import { UserSettings, ExportFormat, AIProvider, AIModel, ABTestConfig } from '@/types'
 import { geminiService } from '@/services/gemini'
 import { AIServiceFactory } from '@/services/ai/factory'
+import { MigrationDialog } from '@/components/MigrationDialog'
+import { ABTestSettings } from '@/components/ABTestSettings'
+import { ABTestMetrics } from '@/components/ABTestMetrics'
 
 const DEFAULT_PROMPT = '' // カスタムプロンプトのデフォルトは空
 
@@ -44,8 +47,8 @@ const AI_MODELS: Record<AIProvider, AIModel[]> = {
     
     // Latest Google Gemini Models (2025)
     { id: 'google/gemini-2.5-pro-preview-03-25', name: 'Gemini 2.5 Pro Preview', provider: 'openrouter', contextLength: 1000000 },
-    { id: 'google/gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash Preview', provider: 'openrouter', contextLength: 1000000 },
-    { id: 'google/gemini-2.5-flash-preview:thinking', name: 'Gemini 2.5 Flash Preview (Thinking)', provider: 'openrouter', contextLength: 1000000 },
+    { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'openrouter', contextLength: 1000000 },
+    { id: 'google/gemini-2.5-flash:thinking', name: 'Gemini 2.5 Flash (Thinking)', provider: 'openrouter', contextLength: 1000000 },
     { id: 'google/gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'openrouter', contextLength: 1000000 },
     { id: 'google/gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash Lite', provider: 'openrouter', contextLength: 1000000 },
     { id: 'google/gemini-pro-1.5', name: 'Gemini Pro 1.5', provider: 'openrouter', contextLength: 2800000 },
@@ -79,7 +82,9 @@ function App() {
     promptTemplate: DEFAULT_PROMPT,
     autoUpdateInterval: 2, // 自動更新間隔（分）、0はOFF
     exportFormat: 'markdown',
-    userName: '' // ユーザー名を追加
+    userName: '', // ユーザー名を追加
+    abTestEnabled: false,
+    abTestConfig: undefined
   })
   const [saved, setSaved] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
@@ -87,6 +92,7 @@ function App() {
   const [checkingApiKey, setCheckingApiKey] = useState(false)
   const [availableModels, setAvailableModels] = useState<AIModel[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
+  const [showMigrationDialog, setShowMigrationDialog] = useState(false)
   
   useEffect(() => {
     loadSettings()
@@ -316,8 +322,8 @@ function App() {
                     
                     <optgroup label="🔍 Latest Gemini Models (2025 - 推奨)">
                       <option value="google/gemini-2.5-pro-preview-03-25">Gemini 2.5 Pro Preview (Context: 1,000,000) ⭐ 最新 + 思考機能</option>
-                      <option value="google/gemini-2.5-flash-preview">Gemini 2.5 Flash Preview (Context: 1,000,000) ⭐ 最新高速</option>
-                      <option value="google/gemini-2.5-flash-preview:thinking">Gemini 2.5 Flash (Thinking) (Context: 1,000,000) ⭐ 思考特化</option>
+                      <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (Context: 1,000,000) ⭐ 最新高速</option>
+                      <option value="google/gemini-2.5-flash:thinking">Gemini 2.5 Flash (Thinking) (Context: 1,000,000) ⭐ 思考特化</option>
                       <option value="google/gemini-2.0-flash">Gemini 2.0 Flash (Context: 1,000,000)</option>
                       <option value="google/gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Context: 1,000,000)</option>
                       <option value="google/gemini-pro-1.5">Gemini Pro 1.5 (Context: 2,800,000) ⭐ 大コンテキスト</option>
@@ -491,6 +497,38 @@ function App() {
             </div>
           </div>
           
+          {/* A/Bテスト設定 */}
+          <div>
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">A/Bテスト設定</h2>
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="abTestEnabled"
+                  checked={settings.abTestEnabled || false}
+                  onChange={(e) => setSettings({ ...settings, abTestEnabled: e.target.checked })}
+                  className="h-4 w-4 text-primary-600 rounded"
+                />
+                <label htmlFor="abTestEnabled" className="text-sm font-medium text-gray-700">
+                  A/Bテストを有効にする
+                </label>
+              </div>
+              
+              {settings.abTestEnabled && (
+                <ABTestSettings
+                  config={settings.abTestConfig}
+                  onConfigChange={(config) => setSettings({ ...settings, abTestConfig: config })}
+                />
+              )}
+              
+              {settings.abTestEnabled && settings.abTestConfig && (
+                <div className="mt-4">
+                  <ABTestMetrics />
+                </div>
+              )}
+            </div>
+          </div>
+          
           <div>
             <h2 className="text-xl font-semibold text-gray-800 mb-4">エクスポート設定</h2>
             <div className="space-y-4">
@@ -533,6 +571,26 @@ function App() {
             </div>
           </div>
           
+          <div>
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">システム設定</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  データストレージ
+                </label>
+                <p className="text-sm text-gray-600 mb-2">
+                  現在Chrome Storageを使用していますが、より大容量のデータを保存できるIndexedDBへ移行できます。
+                </p>
+                <button
+                  onClick={() => setShowMigrationDialog(true)}
+                  className="btn-secondary"
+                >
+                  データ移行ツールを開く
+                </button>
+              </div>
+            </div>
+          </div>
+          
           
           <div className="flex justify-end pt-4 border-t">
             <button
@@ -565,6 +623,16 @@ function App() {
           </p>
         </div>
       </div>
+      
+      {/* Migration Dialog */}
+      <MigrationDialog
+        isOpen={showMigrationDialog}
+        onClose={() => setShowMigrationDialog(false)}
+        onMigrationComplete={() => {
+          console.log('Migration completed successfully')
+          // 必要に応じて設定を更新
+        }}
+      />
     </div>
   )
 }

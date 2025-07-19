@@ -5,6 +5,17 @@ import { API_CONSTANTS, TEMPERATURE_SETTINGS, STORAGE_CONSTANTS } from '../../co
 
 export class OpenRouterService extends BaseAIService {
   private baseURL = 'https://openrouter.ai/api/v1'
+  
+  // 古いモデル名から新しいモデル名へのマッピング
+  private modelMapping: Record<string, string> = {
+    'google/gemini-2.5-flash-preview': 'google/gemini-2.5-flash',
+    'google/gemini-2.5-flash-preview:thinking': 'google/gemini-2.5-flash:thinking'
+  }
+  
+  // モデル名を正規化する関数
+  private normalizeModelName(modelName: string): string {
+    return this.modelMapping[modelName] || modelName
+  }
 
   async generateMinutes(
     transcripts: Transcript[], 
@@ -21,7 +32,13 @@ export class OpenRouterService extends BaseAIService {
     // 出力用のトークンを確保（4000トークン）
     const outputTokens = 4000
     
-    const selectedModel = settings.selectedModel || 'anthropic/claude-3.5-sonnet'
+    const rawSelectedModel = settings.selectedModel || 'anthropic/claude-3.5-sonnet'
+    const selectedModel = this.normalizeModelName(rawSelectedModel)
+    
+    // モデル名が変換された場合はログを出力
+    if (rawSelectedModel !== selectedModel) {
+      console.log(`OpenRouter: Model name normalized from '${rawSelectedModel}' to '${selectedModel}'`)
+    }
     const maxContextTokens = MODEL_LIMITS[selectedModel as keyof typeof MODEL_LIMITS] || DEFAULT_MODEL_LIMIT
     
     // 安全なマージンを含めた利用可能トークン数
@@ -66,7 +83,7 @@ export class OpenRouterService extends BaseAIService {
     try {
       // リクエストボディを事前に作成してサイズを確認
       const requestBody = {
-        model: settings.selectedModel || 'anthropic/claude-3.5-sonnet',
+        model: selectedModel,
         messages: [
           {
             role: 'user',
@@ -92,11 +109,6 @@ export class OpenRouterService extends BaseAIService {
 
       if (!response.ok) {
         const errorData = await response.text()
-        console.error('OpenRouter API error details:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorData
-        })
         throw new Error(`OpenRouter API error: ${response.status} ${response.statusText} - ${errorData}`)
       }
 
@@ -118,7 +130,6 @@ export class OpenRouterService extends BaseAIService {
       
       return minutes
     } catch (error) {
-      console.error('Failed to generate minutes with OpenRouter:', error)
       throw new Error('議事録の生成に失敗しました')
     }
   }
@@ -153,7 +164,6 @@ export class OpenRouterService extends BaseAIService {
         }
       }
     } catch (error) {
-      console.error('Failed to check OpenRouter rate limit:', error)
     }
     
     return {
@@ -174,7 +184,7 @@ export class OpenRouterService extends BaseAIService {
           'X-Title': 'theMinutesBoard'
         },
         body: JSON.stringify({
-          model: modelId || 'anthropic/claude-3.5-haiku',
+          model: this.normalizeModelName(modelId || 'anthropic/claude-3.5-haiku'),
           messages: [
             {
               role: 'user',
@@ -188,18 +198,12 @@ export class OpenRouterService extends BaseAIService {
 
       if (!response.ok) {
         const errorData = await response.text()
-        console.error('OpenRouter API error details:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorData
-        })
         throw new Error(`OpenRouter API error: ${response.status} ${response.statusText} - ${errorData}`)
       }
 
       const data = await response.json()
       return data.choices[0]?.message?.content || ''
     } catch (error) {
-      console.error('Failed to generate content with OpenRouter:', error)
       throw new Error('コンテンツの生成に失敗しました')
     }
   }
@@ -222,7 +226,7 @@ export class OpenRouterService extends BaseAIService {
           'X-Title': 'theMinutesBoard'
         },
         body: JSON.stringify({
-          model: 'anthropic/claude-3.5-haiku',
+          model: this.normalizeModelName('anthropic/claude-3.5-haiku'),
           messages: [
             {
               role: 'user',
@@ -243,7 +247,6 @@ export class OpenRouterService extends BaseAIService {
       
       return this.parseNextStepsResponse(content, meeting.id)
     } catch (error) {
-      console.error('Failed to generate next steps with OpenRouter:', error)
       throw new Error('ネクストステップの生成に失敗しました')
     }
   }
@@ -295,7 +298,7 @@ export class OpenRouterService extends BaseAIService {
           'X-Title': 'theMinutesBoard'
         },
         body: JSON.stringify({
-          model: 'openai/gpt-4o-mini',
+          model: this.normalizeModelName('openai/gpt-4o-mini'),
           messages,
           max_tokens: 1000,
           temperature: 0.7
@@ -309,7 +312,6 @@ export class OpenRouterService extends BaseAIService {
       const data = await response.json()
       return data.choices[0]?.message?.content || ''
     } catch (error) {
-      console.error('Failed to send chat message with OpenRouter:', error)
       throw new Error('チャットメッセージの送信に失敗しました')
     }
   }
@@ -325,7 +327,7 @@ export class OpenRouterService extends BaseAIService {
           'X-Title': 'theMinutesBoard'
         },
         body: JSON.stringify({
-          model: 'anthropic/claude-3.5-haiku',
+          model: this.normalizeModelName('anthropic/claude-3.5-haiku'),
           messages: [
             {
               role: 'user',
@@ -339,18 +341,12 @@ export class OpenRouterService extends BaseAIService {
 
       if (!response.ok) {
         const errorData = await response.text()
-        console.error('OpenRouter API error details:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorData
-        })
         throw new Error(`OpenRouter API error: ${response.status} ${response.statusText} - ${errorData}`)
       }
 
       const data = await response.json()
       return data.choices[0]?.message?.content || ''
     } catch (error) {
-      console.error('Failed to generate text with OpenRouter:', error)
       throw new Error('テキストの生成に失敗しました')
     }
   }
