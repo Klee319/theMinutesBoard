@@ -55,7 +55,7 @@ export const ResearchVoiceButton: React.FC<ResearchVoiceButtonProps> = ({
             .map((t: any) => t.content)
             .join(' ')
 
-          // リサーチを実行
+          // リサーチを実行（60秒のタイムアウトを設定）
           const researchResponse = await ChromeErrorHandler.sendMessage({
             type: 'AI_RESEARCH',
             payload: { 
@@ -63,7 +63,7 @@ export const ResearchVoiceButton: React.FC<ResearchVoiceButtonProps> = ({
               question: voiceQuery,
               transcripts: stopResponse.transcripts.map((t: any) => t.content)
             }
-          })
+          }, { timeout: 60000 })
 
           if (researchResponse?.success && researchResponse.response) {
             // チャットログに追加（録音中の字幕も含める）

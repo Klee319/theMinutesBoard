@@ -1,4 +1,4 @@
-import { AIProvider, UserSettings, AIGenerationResult } from '@/types'
+import { AIProvider, UserSettings, AIGenerationResult, Meeting } from '@/types'
 import { BaseAIService } from './base'
 import { AIServiceFactory } from './factory'
 
@@ -136,8 +136,8 @@ export class EnhancedAIService {
     return this.executeWithFallback(
       async (service) => {
         // リサーチはsendChatMessageを使用
-        const prompt = `${JSON.stringify(context)}\n\nQuery: ${query}`
-        const response = await service.sendChatMessage(prompt, undefined)
+        // contextオブジェクトを適切に渡す
+        const response = await service.sendChatMessage(query, context)
         return { text: response, usage: { totalTokens: 0 } }
       },
       options

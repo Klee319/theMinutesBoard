@@ -425,12 +425,12 @@ function App() {
       <header className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700 h-16 min-h-[64px] max-h-[64px] overflow-hidden" role="banner">
         <div className="max-w-7xl mx-auto px-4 h-full flex items-center">
           <div className="flex items-center justify-between flex-nowrap w-full">
-            <div className="flex items-center gap-4">
-              <h1 className="text-xl font-bold text-gray-900">theMinutesBoard</h1>
-              <div className="flex gap-2">
+            <div className="flex items-center gap-4 flex-shrink-0">
+              <h1 className="text-xl font-bold text-gray-900 whitespace-nowrap">theMinutesBoard</h1>
+              <div className="flex gap-2 items-center">
                 <button
                   onClick={handleBackToLive}
-                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                     isLiveMode
                       ? 'bg-blue-100 text-blue-800'
                       : 'text-gray-600 hover:text-gray-900'
@@ -448,7 +448,7 @@ function App() {
                       loadData()
                     }, 100)
                   }}
-                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                     !isLiveMode && currentTab === 'history'
                       ? 'bg-blue-100 text-blue-800'
                       : 'text-gray-600 hover:text-gray-900'
@@ -461,7 +461,7 @@ function App() {
                     setIsLiveMode(false)
                     setCurrentTab('nextsteps')
                   }}
-                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                     !isLiveMode && currentTab === 'nextsteps'
                       ? 'bg-blue-100 text-blue-800'
                       : 'text-gray-600 hover:text-gray-900'
@@ -481,7 +481,7 @@ function App() {
                   minWidth: '400px' // 固定幅を確保してレイアウトシフトを防ぐ
                 }}
               >
-                <span className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">表示/非表示切り替え：</span>
+                <span className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">&nbsp;</span>
                 {/* ネクストステップトグル */}
                 <label className="flex items-center gap-2 cursor-pointer" title="ネクストステップパネルの表示/非表示を切り替えます">
                   <span className="text-sm text-gray-700 whitespace-nowrap">📝 ネクストステップ</span>

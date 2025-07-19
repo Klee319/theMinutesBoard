@@ -9,6 +9,7 @@ export interface ChromeErrorHandlerOptions {
   onContextInvalidated?: () => void
   maxRetries?: number
   retryDelay?: number
+  timeout?: number // タイムアウト時間（ミリ秒）
 }
 
 export class ChromeErrorHandler {
@@ -52,7 +53,7 @@ export class ChromeErrorHandler {
     message: any, 
     options: ChromeErrorHandlerOptions = {}
   ): Promise<T> {
-    const { maxRetries = 3, retryDelay = 1000 } = options
+    const { maxRetries = 3, retryDelay = 1000, timeout = 30000 } = options
     
     // 最初にランタイムが利用可能か確認
     if (!chrome.runtime?.id) {
@@ -75,14 +76,14 @@ export class ChromeErrorHandler {
             return
           }
           
-          // タイムアウトを設定（30秒）
-          const timeout = setTimeout(() => {
+          // タイムアウトを設定
+          const timeoutId = setTimeout(() => {
             reject(new Error('Message response timeout'))
-          }, 30000)
+          }, timeout)
           
           try {
             chrome.runtime.sendMessage(message, (response) => {
-              clearTimeout(timeout)
+              clearTimeout(timeoutId)
               
               // lastErrorのチェックを最初に行う
               if (chrome.runtime.lastError) {
@@ -101,7 +102,7 @@ export class ChromeErrorHandler {
               resolve(response)
             })
           } catch (err) {
-            clearTimeout(timeout)
+            clearTimeout(timeoutId)
             reject(err)
           }
         })

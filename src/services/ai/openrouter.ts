@@ -258,6 +258,11 @@ export class OpenRouterService extends BaseAIService {
     try {
       const messages = []
       
+      // contextがundefinedの場合はデフォルト値を設定
+      if (!context) {
+        context = {}
+      }
+      
       // システムプロンプトを設定
       if (context.systemPrompt) {
         messages.push({
@@ -268,12 +273,24 @@ export class OpenRouterService extends BaseAIService {
       
       // コンテキスト情報を追加
       let contextMessage = '【現在の会議情報】\n'
-      contextMessage += `タイトル: ${context.meetingInfo.title}\n`
-      contextMessage += `参加者: ${context.meetingInfo.participants.join(', ')}\n`
-      contextMessage += `発言数: ${context.meetingInfo.transcriptsCount}\n\n`
       
-      if (context.minutes) {
-        contextMessage += '【現在の議事録】\n' + context.minutes + '\n\n'
+      // meetingInfo または meetingContext をサポート
+      const meetingInfo = context.meetingInfo || context.meetingContext
+      if (meetingInfo) {
+        contextMessage += `タイトル: ${meetingInfo.title || '不明'}\n`
+        contextMessage += `参加者: ${meetingInfo.participants?.join(', ') || '不明'}\n`
+        contextMessage += `発言数: ${meetingInfo.transcriptsCount || 0}\n\n`
+      } else {
+        contextMessage += 'タイトル: 不明\n参加者: 不明\n発言数: 0\n\n'
+      }
+      
+      if (context.minutes || (context.meetingContext && context.meetingContext.minutesContent)) {
+        const minutesContent = context.minutes || context.meetingContext.minutesContent
+        contextMessage += '【現在の議事録】\n' + minutesContent + '\n\n'
+      }
+      
+      if (context.currentTopicSummary) {
+        contextMessage += '【現在の議題】\n' + context.currentTopicSummary + '\n\n'
       }
       
       if (context.recentTranscripts && context.recentTranscripts.length > 0) {
@@ -281,6 +298,14 @@ export class OpenRouterService extends BaseAIService {
         context.recentTranscripts.forEach((t: Transcript) => {
           const time = new Date(t.timestamp).toLocaleTimeString('ja-JP')
           contextMessage += `[${time}] ${t.speaker}: ${t.content}\n`
+        })
+      }
+      
+      if (context.differenceTranscripts && context.differenceTranscripts.length > 0) {
+        contextMessage += '【音声入力中の発言】\n'
+        context.differenceTranscripts.forEach((t: any) => {
+          const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString('ja-JP') : ''
+          contextMessage += time ? `[${time}] ${t.speaker}: ${t.content || t.text}\n` : `${t.speaker}: ${t.content || t.text}\n`
         })
       }
       

@@ -189,24 +189,43 @@ export class GeminiService extends BaseAIService {
       throw new Error('Gemini API key not configured')
     }
 
+    // contextがundefinedの場合はデフォルト値を設定
+    if (!context) {
+      context = {}
+    }
+
     // チャットコンテキストを構築
     let chatPrompt = context.systemPrompt || 'あなたは議事録作成AIアシスタントです。'
     
-    if (context.meetingInfo) {
+    // meetingInfo または meetingContext をサポート
+    const meetingInfo = context.meetingInfo || context.meetingContext
+    if (meetingInfo) {
       chatPrompt += `\n\n【会議情報】\n`
-      chatPrompt += `- タイトル: ${context.meetingInfo.title}\n`
-      chatPrompt += `- 参加者: ${context.meetingInfo.participants?.join(', ') || '不明'}\n`
-      chatPrompt += `- 発言数: ${context.meetingInfo.transcriptsCount || 0}件\n`
+      chatPrompt += `- タイトル: ${meetingInfo.title || '不明'}\n`
+      chatPrompt += `- 参加者: ${meetingInfo.participants?.join(', ') || '不明'}\n`
+      chatPrompt += `- 発言数: ${meetingInfo.transcriptsCount || 0}件\n`
     }
 
-    if (context.minutes) {
-      chatPrompt += `\n\n【議事録】\n${context.minutes}`
+    if (context.minutes || (context.meetingContext && context.meetingContext.minutesContent)) {
+      const minutesContent = context.minutes || context.meetingContext.minutesContent
+      chatPrompt += `\n\n【議事録】\n${minutesContent}`
+    }
+
+    if (context.currentTopicSummary) {
+      chatPrompt += `\n\n【現在の議題】\n${context.currentTopicSummary}`
     }
 
     if (context.recentTranscripts && context.recentTranscripts.length > 0) {
       chatPrompt += `\n\n【最近の発言】\n`
       chatPrompt += context.recentTranscripts.map((t: any) => 
         `${t.speaker}: ${t.content}`
+      ).join('\n')
+    }
+
+    if (context.differenceTranscripts && context.differenceTranscripts.length > 0) {
+      chatPrompt += `\n\n【音声入力中の発言】\n`
+      chatPrompt += context.differenceTranscripts.map((t: any) => 
+        `${t.speaker}: ${t.content || t.text}`
       ).join('\n')
     }
 

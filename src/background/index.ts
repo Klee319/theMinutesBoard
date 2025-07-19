@@ -391,10 +391,16 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
         return true
         
       case 'AI_RESEARCH':
+        // Service Workerを起動状態に保つ
+        serviceWorkerOptimizer.keepAlive()
+        
         handleAiResearch(message.payload)
-          .then(result => sendResponse(result))
+          .then(result => {
+            sendResponse(result)
+          })
           .catch(error => {
-            sendResponse({ success: false, error: error.message })
+            logger.error('AI_RESEARCH handler error:', error)
+            sendResponse({ success: false, error: error.message || 'リサーチ処理中にエラーが発生しました' })
           })
         return true
         
@@ -412,18 +418,30 @@ chrome.runtime.onMessage.addListener((message: ChromeMessage, sender, sendRespon
         return false
         
       case 'AI_ASSISTANT_START':
+        // Service Workerを起動状態に保つ
+        serviceWorkerOptimizer.keepAlive()
+        
         handleAIAssistantStart(message.payload)
-          .then(result => sendResponse(result))
+          .then(result => {
+            sendResponse(result)
+          })
           .catch(error => {
-            sendResponse({ success: false, error: error.message })
+            logger.error('AI_ASSISTANT_START handler error:', error)
+            sendResponse({ success: false, error: error.message || '音声記録の開始に失敗しました' })
           })
         return true
         
       case 'AI_ASSISTANT_STOP':
+        // Service Workerを起動状態に保つ
+        serviceWorkerOptimizer.keepAlive()
+        
         handleAIAssistantStop(message.payload)
-          .then(result => sendResponse(result))
+          .then(result => {
+            sendResponse(result)
+          })
           .catch(error => {
-            sendResponse({ success: false, error: error.message })
+            logger.error('AI_ASSISTANT_STOP handler error:', error)
+            sendResponse({ success: false, error: error.message || '音声記録の停止に失敗しました' })
           })
         return true
         
@@ -1689,13 +1707,25 @@ ${meeting.minutes?.content || '（議事録がまだ生成されていません�
 }
 
 async function handleAiResearch(payload: { meetingId: string; question: string; transcripts: string[] }): Promise<{ success: boolean; response?: string; error?: string }> {
-  const { meetingId, question, transcripts } = payload
-  
-  if (!meetingId || !question) {
-    return { success: false, error: 'Meeting ID and question are required' }
-  }
-  
   try {
+    const { meetingId, question, transcripts } = payload
+    
+    // パラメータの検証
+    if (!meetingId) {
+      logger.error('handleAiResearch: Meeting ID is missing')
+      return { success: false, error: 'Meeting IDが必要です' }
+    }
+    
+    if (!question || question.trim() === '') {
+      logger.error('handleAiResearch: Question is missing or empty')
+      return { success: false, error: '質問内容が必要です' }
+    }
+    
+    logger.info(`handleAiResearch called with meetingId: ${meetingId}, question length: ${question.length}`)
+    
+    // 実際のミーティングIDを取得（currentMeetingIdを優先）
+    const actualMeetingId = currentMeetingId || meetingId
+    logger.info(`handleAiResearch: using actualMeetingId=${actualMeetingId}, currentMeetingId=${currentMeetingId}`)
     // 会議データを取得
     const meetings = await new Promise<Meeting[]>((resolve) => {
       chrome.storage.local.get(['meetings'], (result) => {
@@ -1703,9 +1733,10 @@ async function handleAiResearch(payload: { meetingId: string; question: string; 
       })
     })
     
-    const meeting = meetings.find(m => m.id === meetingId)
+    const meeting = meetings.find(m => m.id === actualMeetingId)
     if (!meeting) {
-      return { success: false, error: 'Meeting not found' }
+      logger.error(`Meeting not found: actualMeetingId=${actualMeetingId}, availableMeetings=${meetings.map(m => m.id).join(', ')}`)
+      return { success: false, error: '会議が見つかりません' }
     }
     
     // 設定を取得
@@ -1719,7 +1750,7 @@ async function handleAiResearch(payload: { meetingId: string; question: string; 
     const enhancedService = new EnhancedAIService(settings)
     
     // AIアシスタントセッションから差分を計算
-    const session = aiAssistantSessions.get(meetingId)
+    const session = aiAssistantSessions.get(meetingId) || aiAssistantSessions.get(actualMeetingId)
     let differenceTranscripts: Transcript[] = []
     
     if (session && session.type === 'research') {
@@ -1813,7 +1844,8 @@ ${transcripts.length > 0 ? `【音声入力中の内容】\n${transcripts.join('
     
     return { success: true, response }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    logger.error('handleAiResearch error:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'リサーチ処理中にエラーが発生しました' }
   }
 }
 
@@ -2029,8 +2061,13 @@ async function handleAIAssistantStart(payload: { meetingId: string; type?: 'next
   // 記録中のタブIDを取得
   const tabId = recordingTabId
   if (!tabId) {
+    logger.error(`AI Assistant Start failed: No recording tab found for meetingId: ${meetingId}`)
     return { success: false, error: '記録中の会議が見つかりません' }
   }
+  
+  // currentMeetingIdを使用して実際のミーティングIDを取得
+  const actualMeetingId = currentMeetingId || meetingId
+  logger.info(`AI Assistant Start: requestedMeetingId=${meetingId}, currentMeetingId=${currentMeetingId}, actualMeetingId=${actualMeetingId}`)
   
   // Content Scriptに字幕チェックを依頼
   try {
@@ -2066,9 +2103,6 @@ async function handleAIAssistantStart(payload: { meetingId: string; type?: 'next
   
   // 現在の会議の字幕数を取得して開始インデックスを記録
   let startTranscriptIndex = 0
-  
-  // 現在記録中のミーティングIDを使用
-  const actualMeetingId = currentMeetingId || meetingId
   
   try {
     const meetings = await new Promise<Meeting[]>((resolve) => {

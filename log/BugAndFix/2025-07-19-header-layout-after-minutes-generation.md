@@ -71,4 +71,26 @@
    <span className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">表示/非表示切り替え：</span>
    ```
 
-これらの修正により、ヘッダー全体が確実に1行の高さに制限され、コンテンツの折り返しが完全に防止されるようになった。
+### App.tsx の追加修正（第3回）
+ナビゲーションボタンのテキストが依然として折り返される問題に対応：
+
+1. **左側コンテナに縮小防止を追加**（428行目）
+   ```tsx
+   <div className="flex items-center gap-4 flex-shrink-0">
+   ```
+
+2. **タイトルに折り返し防止を追加**（429行目）
+   ```tsx
+   <h1 className="text-xl font-bold text-gray-900 whitespace-nowrap">theMinutesBoard</h1>
+   ```
+
+3. **ボタンコンテナにアイテム配置を追加**（430行目）
+   ```tsx
+   <div className="flex gap-2 items-center">
+   ```
+
+4. **すべてのナビゲーションボタンに折り返し防止を追加**（433-468行目）
+   - 各ボタンのclassNameに`whitespace-nowrap flex-shrink-0`を追加
+   - 「ライブ表示」、「履歴」、「ToDo」の3つのボタンすべてに適用
+
+これらの修正により、ヘッダー内のすべての要素が確実に1行に収まり、テキストの折り返しが完全に防止されるようになった。
