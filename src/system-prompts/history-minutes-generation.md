@@ -7,15 +7,15 @@
 
 以下のプレースホルダーが利用可能です：
 
-- `{{userName}}` - ユーザー名（「Unknown」発言者の置換用）
-- `{{meetingDate}}` - 会議日（YYYY-MM-DD形式）
-- `{{startTime}}` - 会議開始時刻
-- `{{endTime}}` - 会議終了時刻
-- `{{participants}}` - 参加者リスト
-- `{{duration}}` - 会議時間
-- `{{transcripts}}` - 発言記録（全体）
-- `{{speakerMap}}` - 話者マップ
-- `{{meetingTitle}}` - 会議タイトル
+- {{userName}} - ユーザー名（「Unknown」発言者の置換用）
+- {{meetingDate}} - 会議日（YYYY-MM-DD形式）
+- {{startTime}} - 会議開始時刻
+- {{endTime}} - 会議終了時刻
+- {{participants}} - 参加者リスト
+- {{duration}} - 会議時間
+- {{transcripts}} - 発言記録（全体）
+- {{speakerMap}} - 話者マップ
+- {{meetingTitle}} - 会議タイトル
 
 ## 総合議事録作成の指針
 

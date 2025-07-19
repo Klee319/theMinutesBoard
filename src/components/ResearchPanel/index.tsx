@@ -189,13 +189,13 @@ export default function ResearchPanel({ meeting, isLocked = false }: ResearchPan
   return (
     <div className="h-full flex flex-col">
       {/* ヘッダー */}
-      <div className="flex-shrink-0 p-4 border-b bg-gray-50">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">🔍 リサーチ</h2>
+      <div className="flex-shrink-0 p-4 border-b bg-gray-50 h-16 min-h-[64px] max-h-[64px] overflow-hidden">
+        <div className="flex flex-nowrap items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900 whitespace-nowrap flex-shrink-0">🔍 リサーチ</h2>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-shrink-0">
             {/* Web検索トグル */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 whitespace-nowrap">
               <span className="text-sm text-gray-600">Web検索</span>
               <button
                 onClick={handleWebSearchToggle}

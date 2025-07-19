@@ -7,15 +7,15 @@
 
 以下のプレースホルダーが利用可能です：
 
-- `{{userName}}` - ユーザー名（「Unknown」発言者の置換用）
-- `{{meetingDate}}` - 会議日（YYYY-MM-DD形式）
-- `{{startTime}}` - 会議開始時刻
-- `{{participants}}` - 参加者リスト
-- `{{duration}}` - 会議時間
-- `{{transcripts}}` - 発言記録
-- `{{speakerMap}}` - 話者マップ
-- `{{currentTime}}` - 現在時刻（議事録更新時刻）
-- `{{previousTopics}}` - 前回更新時点までの議題リスト
+- {{userName}} - ユーザー名（「Unknown」発言者の置換用）
+- {{meetingDate}} - 会議日（YYYY-MM-DD形式）
+- {{startTime}} - 会議開始時刻
+- {{participants}} - 参加者リスト
+- {{duration}} - 会議時間
+- {{transcripts}} - 発言記録
+- {{speakerMap}} - 話者マップ
+- {{currentTime}} - 現在時刻（議事録更新時刻）
+- {{previousTopics}} - 前回更新時点までの議題リスト
 
 ## ライブ議事録作成の指針
 

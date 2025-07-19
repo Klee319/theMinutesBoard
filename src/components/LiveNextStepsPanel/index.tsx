@@ -180,11 +180,11 @@ export default function LiveNextStepsPanel({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-shrink-0 flex items-center justify-between p-4 border-b bg-gray-50">
-        <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold text-gray-900">📋 ネクストステップ</h3>
+      <div className="flex-shrink-0 flex flex-nowrap items-center justify-between p-4 border-b bg-gray-50 h-16 min-h-[64px] max-h-[64px] overflow-hidden">
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <h3 className="text-lg font-semibold text-gray-900 whitespace-nowrap">📋 ネクストステップ</h3>
           {isRecording && autoUpdateInterval > 0 && nextUpdateTime && nextSteps.length > 0 && (
-            <div className="flex items-center gap-2 text-xs text-gray-600">
+            <div className="flex items-center gap-2 text-xs text-gray-600 whitespace-nowrap">
               {isAutoUpdating ? (
                 <div className="flex items-center gap-1">
                   <div className="w-2 h-2 border border-green-600 border-t-transparent rounded-full animate-spin"></div>
@@ -198,7 +198,7 @@ export default function LiveNextStepsPanel({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {/* ネクストステップ生成ボタンは削除（ライブ議事録更新時に自動生成） */}
         </div>
       </div>

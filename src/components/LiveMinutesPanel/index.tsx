@@ -81,7 +81,7 @@ const LiveMinutesPanel = React.memo(function LiveMinutesPanel({
   const topics = useMemo(() => {
     if (!minutes || typeof minutes !== 'string') return []
     
-    const topicRegex = /## \[(\d{2}:\d{2})\] (.+?) ▼\n\n### 要約: (.+)\n([\s\S]*?)(?=\n---\n\n## |\n---\n\n\*最終更新|$)/g
+    const topicRegex = /## \[(\d{2}:\d{2})\] (.+?)(?: ▼)?\n\n### 要約: (.+)\n([\s\S]*?)(?=\n---\n\n## |\n---\n\n\*最終更新|$)/g
     const extractedTopics: Array<{
       id: string
       time: string
@@ -180,7 +180,7 @@ const LiveMinutesPanel = React.memo(function LiveMinutesPanel({
         
         // ライブダイジェストの抽出
         try {
-          const digestMatch = content.match(/## ライブダイジェスト\n### 要約: (.+)\n([\s\S]*?)\n### 発言[▼▽]/)
+          const digestMatch = content.match(/## ライブダイジェスト\n### 要約: (.+)\n([\s\S]*?)\n### 発言[▼▽]?/)
           if (digestMatch) {
             const summary = digestMatch[1]
             const detailsSection = digestMatch[2]
@@ -189,7 +189,7 @@ const LiveMinutesPanel = React.memo(function LiveMinutesPanel({
             const details = detailsSection.match(/^- (.+)$/gm)?.map(line => line.substring(2)) || []
             
             // 発言を抽出
-            const statementsMatch = content.match(/### 発言[▼▽]\n([\s\S]*?)\n\n---/)
+            const statementsMatch = content.match(/### 発言[▼▽]?\n([\s\S]*?)\n\n---/)
             const statements: { speaker: string; content: string }[] = []
             if (statementsMatch) {
               const statementsText = statementsMatch[1]
@@ -235,11 +235,11 @@ const LiveMinutesPanel = React.memo(function LiveMinutesPanel({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-shrink-0 flex items-center justify-between p-4 border-b bg-gray-50 h-16 min-h-[64px]">
-        <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold text-gray-900">📝 議事録（実況）</h3>
+      <div className="flex-shrink-0 flex flex-nowrap items-center justify-between p-4 border-b bg-gray-50 h-16 min-h-[64px] max-h-[64px] overflow-hidden">
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <h3 className="text-lg font-semibold text-gray-900 whitespace-nowrap">📝 議事録（実況）</h3>
           <div 
-            className="flex items-center gap-2 text-xs text-gray-600"
+            className="flex items-center gap-2 text-xs text-gray-600 whitespace-nowrap"
             style={{ 
               visibility: isRecording && autoUpdateInterval > 0 && nextUpdateTime ? 'visible' : 'hidden',
               minWidth: '150px' // 最小幅を確保してレイアウトシフトを防ぐ
@@ -257,7 +257,7 @@ const LiveMinutesPanel = React.memo(function LiveMinutesPanel({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={onManualUpdate}
             disabled={isLocked || isGenerating}
@@ -266,15 +266,16 @@ const LiveMinutesPanel = React.memo(function LiveMinutesPanel({
                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
+            style={{ minWidth: '100px' }} // ボタンの最小幅を固定
             title="議事録とネクストステップを更新"
           >
             {isGenerating ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 justify-center">
                 <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                 <span>更新中...</span>
               </div>
             ) : (
-              '🔄 更新'
+              <span className="flex items-center justify-center">🔄 更新</span>
             )}
           </button>
         </div>

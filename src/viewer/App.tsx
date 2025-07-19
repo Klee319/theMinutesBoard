@@ -279,7 +279,7 @@ function App() {
       const meetings = result.meetings || []
       setAllMeetings(meetings)
       
-      if (result.currentMeetingId && isLiveMode) {
+      if (result.currentMeetingId) {
         const current = meetings.find((m: Meeting) => m.id === result.currentMeetingId)
         if (current) {
           logger.debug('Current meeting found:', current.id)
@@ -294,10 +294,6 @@ function App() {
           // currentMeetingIdがあるが会議が見つからない場合は、currentMeetingをnullにしない
           // 既存のcurrentMeetingを保持する
         }
-      } else if (!result.currentMeetingId && isLiveMode) {
-        // ライブモードだがcurrentMeetingIdがない場合
-        logger.debug('Live mode but no currentMeetingId')
-        // 明示的にnullに設定するのではなく、既存の状態を保持
       }
     })
   }

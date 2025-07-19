@@ -75,14 +75,35 @@ export class ChromeErrorHandler {
             return
           }
           
-          chrome.runtime.sendMessage(message, (response) => {
-            const error = this.checkLastError()
-            if (error) {
-              reject(error)
-            } else {
+          // タイムアウトを設定（30秒）
+          const timeout = setTimeout(() => {
+            reject(new Error('Message response timeout'))
+          }, 30000)
+          
+          try {
+            chrome.runtime.sendMessage(message, (response) => {
+              clearTimeout(timeout)
+              
+              // lastErrorのチェックを最初に行う
+              if (chrome.runtime.lastError) {
+                const error = new Error(chrome.runtime.lastError.message || 'Unknown Chrome runtime error')
+                logger.error('Chrome runtime error in response:', error)
+                reject(error)
+                return
+              }
+              
+              // レスポンスがundefinedの場合もエラーとして扱う
+              if (response === undefined) {
+                reject(new Error('No response received from background script'))
+                return
+              }
+              
               resolve(response)
-            }
-          })
+            })
+          } catch (err) {
+            clearTimeout(timeout)
+            reject(err)
+          }
         })
       } catch (error) {
         logger.error(`Message send attempt ${attempt + 1} failed:`, error)

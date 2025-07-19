@@ -950,13 +950,14 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
                   maxRetries: 3,
                   retryDelay: 1000,
                   exponentialBackoff: true
-                }
+                },
+                promptType: payload?.promptType || 'default'
               }
             )
             
             // 既存のAIサービスと同じ形式に変換
             const minutes = {
-              content: result.text,
+              content: result.content,
               generatedAt: new Date(),
               provider: mergedSettings.aiProvider
             }
