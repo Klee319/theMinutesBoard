@@ -422,9 +422,9 @@ function App() {
       </a>
       
       {/* ヘッダー */}
-      <header className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700" role="banner">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between flex-nowrap">
+      <header className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700 h-16 min-h-[64px] max-h-[64px] overflow-hidden" role="banner">
+        <div className="max-w-7xl mx-auto px-4 h-full flex items-center">
+          <div className="flex items-center justify-between flex-nowrap w-full">
             <div className="flex items-center gap-4">
               <h1 className="text-xl font-bold text-gray-900">theMinutesBoard</h1>
               <div className="flex gap-2">
@@ -472,7 +472,7 @@ function App() {
               </div>
             </div>
             
-            <div className="flex items-center gap-4 min-h-[40px]">
+            <div className="flex items-center gap-4 flex-shrink-0">
               {/* ライブモード時のトグルスイッチ */}
               <div 
                 className="flex items-center gap-3"
@@ -481,7 +481,7 @@ function App() {
                   minWidth: '400px' // 固定幅を確保してレイアウトシフトを防ぐ
                 }}
               >
-                <span className="text-xs text-gray-500">表示/非表示切り替え：</span>
+                <span className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">表示/非表示切り替え：</span>
                 {/* ネクストステップトグル */}
                 <label className="flex items-center gap-2 cursor-pointer" title="ネクストステップパネルの表示/非表示を切り替えます">
                   <span className="text-sm text-gray-700 whitespace-nowrap">📝 ネクストステップ</span>

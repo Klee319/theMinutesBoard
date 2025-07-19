@@ -99,7 +99,10 @@ export class EnhancedAIService {
     }
   ): Promise<AIGenerationResult> {
     return this.executeWithFallback(
-      (service) => service.generateChatResponse(message, context),
+      async (service) => {
+        const response = await service.sendChatMessage(message, context)
+        return { text: response, usage: { totalTokens: 0 } }
+      },
       options
     )
   }
@@ -114,9 +117,8 @@ export class EnhancedAIService {
   ): Promise<string> {
     const result = await this.executeWithFallback(
       async (service) => {
-        // generateTextメソッドは基本的にgenerateChatResponseと同じ
-        const response = await service.generateChatResponse(prompt, undefined)
-        return response
+        const response = await service.generateText(prompt, config)
+        return { text: response, usage: { totalTokens: 0 } }
       },
       options
     )
@@ -133,9 +135,10 @@ export class EnhancedAIService {
   ): Promise<AIGenerationResult> {
     return this.executeWithFallback(
       async (service) => {
-        // リサーチはチャット応答として実装
+        // リサーチはsendChatMessageを使用
         const prompt = `${JSON.stringify(context)}\n\nQuery: ${query}`
-        return service.generateChatResponse(prompt, undefined)
+        const response = await service.sendChatMessage(prompt, undefined)
+        return { text: response, usage: { totalTokens: 0 } }
       },
       options
     )

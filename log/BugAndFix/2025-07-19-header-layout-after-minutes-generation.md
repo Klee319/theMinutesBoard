@@ -36,7 +36,7 @@
 
 ## 修正内容と修正箇所
 
-### App.tsx の修正
+### App.tsx の修正（第1回）
 1. **ヘッダーのflexコンテナに`flex-nowrap`を追加**（427行目）
    ```tsx
    <div className="flex items-center justify-between flex-nowrap">
@@ -46,15 +46,29 @@
    - 条件付きレンダリングを`visibility`制御に変更
    - `minWidth: '400px'`を設定してレイアウトシフトを防ぐ
    - 各要素に`whitespace-nowrap`と`flex-shrink-0`を追加
-   
+
+### App.tsx の追加修正（第2回）
+問題が継続したため、より強力な制約を追加：
+
+1. **ヘッダー要素自体に高さ制約を追加**（425行目）
    ```tsx
-   <div 
-     className="flex items-center gap-3"
-     style={{ 
-       visibility: isLiveMode ? 'visible' : 'hidden',
-       minWidth: '400px'
-     }}
-   >
+   <header className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700 h-16 min-h-[64px] max-h-[64px] overflow-hidden" role="banner">
    ```
 
-これにより、ライブ議事録生成時の状態変化に関わらず、ヘッダーのレイアウトが安定して維持されるようになった。
+2. **ヘッダー内部のコンテナ修正**（426-427行目）
+   ```tsx
+   <div className="max-w-7xl mx-auto px-4 h-full flex items-center">
+     <div className="flex items-center justify-between flex-nowrap w-full">
+   ```
+
+3. **右側ボタンエリアの高さ制約削除**（475行目）
+   ```tsx
+   <div className="flex items-center gap-4 flex-shrink-0">
+   ```
+
+4. **「表示/非表示切り替え：」テキストに折り返し防止を追加**（484行目）
+   ```tsx
+   <span className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">表示/非表示切り替え：</span>
+   ```
+
+これらの修正により、ヘッダー全体が確実に1行の高さに制限され、コンテンツの折り返しが完全に防止されるようになった。
