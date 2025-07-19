@@ -1,5 +1,4 @@
-import { ChromeMessage, MessageType, StorageData, Meeting, UserSettings, SharedState, Transcript } from '@/types'
-import { geminiService } from '@/services/gemini'
+import { ChromeMessage, Meeting, UserSettings, SharedState, Transcript } from '@/types'
 import { AIServiceFactory } from '@/services/ai/factory'
 import { EnhancedAIService } from '@/services/ai/enhanced-ai-service'
 import { debugStorageInfo } from './debug'
@@ -10,7 +9,6 @@ import { SessionRecovery } from '@/utils/session-recovery'
 import { TRANSCRIPT_CONSTANTS, STORAGE_CONSTANTS, TIMING_CONSTANTS, API_CONSTANTS } from '../constants'
 import { TIMING_CONFIG, STORAGE_CONFIG } from '@/constants/config'
 import { sessionManager } from './session-manager'
-import { performanceMonitor } from '@/utils/performance-monitor'
 import { serviceWorkerOptimizer } from './service-worker-optimizer'
 
 let currentMeetingId: string | null = null
@@ -19,10 +17,13 @@ let recordingTabId: number | null = null
 // 議事録生成の排他制御
 let isMinutesGenerating = false
 
+// トランスクリプト更新のキューとロック
+const transcriptUpdateQueue: { transcript: Transcript, timestamp: number }[] = []
+let isProcessingTranscripts = false
+
 // ストレージ管理用の定数
 const STORAGE_WARNING_THRESHOLD = STORAGE_CONFIG.STORAGE_WARNING_THRESHOLD
 const STORAGE_CRITICAL_THRESHOLD = STORAGE_CONFIG.STORAGE_CRITICAL_THRESHOLD
-const MAX_TRANSCRIPTS_PER_MEETING = STORAGE_CONFIG.MAX_TRANSCRIPTS_PER_MEETING
 const TRANSCRIPT_BATCH_SIZE = TRANSCRIPT_CONSTANTS.MAX_BUFFER_SIZE
 
 // 共有状態
@@ -200,7 +201,7 @@ function stopSessionSave() {
 }
 
 // Service Workerのキープアライブ機能
-let keepAliveInterval: NodeJS.Timeout | null = null
+let keepAliveInterval: number | null = null
 
 function startKeepAlive() {
   if (keepAliveInterval) return
@@ -624,10 +625,10 @@ async function generateHistoryMinutesIfNeeded(meeting: Meeting): Promise<void> {
         meeting.endTime = new Date()
         // Invalid Date チェック
         if (isNaN(meeting.endTime.getTime())) {
-          console.warn('Created invalid endTime, using epoch time')
+          logger.warn('Created invalid endTime, using epoch time')
           meeting.endTime = new Date(Date.now())
         }
-      } catch (error) {
+      } catch (_error) {
         meeting.endTime = new Date(Date.now())
       }
     }
@@ -652,7 +653,8 @@ async function generateHistoryMinutesIfNeeded(meeting: Meeting): Promise<void> {
         }
       })
     }
-  } catch (error) {
+  } catch (_error) {
+    // Error already logged
   } finally {
     currentMeetingId = tempMeetingId
   }
@@ -680,7 +682,7 @@ async function handleStopRecording(): Promise<void> {
   }
   
   const stoppedMeetingId = currentMeetingId
-  const stoppedTabId = recordingTabId
+  // const stoppedTabId = recordingTabId
   
   // SessionManagerから全てのトランスクリプトを取得してからセッションを終了
   const allTranscripts = sessionManager.endSession(stoppedMeetingId)
@@ -728,7 +730,7 @@ async function handleStopRecording(): Promise<void> {
     
     // 全てのGoogle Meetタブに停止完了を通知
     notifyAllMeetTabs(stoppedMeetingId)
-  } catch (error) {
+  } catch (_error) {
     // エラーが発生しても記録状態はクリアする
     currentMeetingId = null
     recordingTabId = null
@@ -736,7 +738,52 @@ async function handleStopRecording(): Promise<void> {
   }
 }
 
-async function handleTranscriptUpdate(transcript: any): Promise<void> {
+// トランスクリプトのバッチ処理
+async function processTranscriptQueue(): Promise<void> {
+  if (isProcessingTranscripts || transcriptUpdateQueue.length === 0) {
+    return
+  }
+  
+  isProcessingTranscripts = true
+  
+  try {
+    // キューから最大10件を取り出して処理
+    const batch = transcriptUpdateQueue.splice(0, 10)
+    
+    for (const item of batch) {
+      try {
+        await handleSingleTranscriptUpdate(item.transcript)
+      } catch (error) {
+        logger.error('Failed to process transcript:', error)
+        // エラーが発生しても他のトランスクリプトの処理は続ける
+      }
+    }
+  } finally {
+    isProcessingTranscripts = false
+    
+    // まだキューにアイテムがあれば次のバッチを処理
+    if (transcriptUpdateQueue.length > 0) {
+      setTimeout(() => processTranscriptQueue(), 100)
+    }
+  }
+}
+
+async function handleTranscriptUpdate(transcript: Transcript): Promise<void> {
+  if (!currentMeetingId) {
+    return
+  }
+  
+  // キューに追加
+  transcriptUpdateQueue.push({
+    transcript,
+    timestamp: Date.now()
+  })
+  
+  // バッチ処理を開始
+  processTranscriptQueue()
+}
+
+async function handleSingleTranscriptUpdate(transcript: Transcript): Promise<void> {
   if (!currentMeetingId) {
     return
   }
@@ -756,17 +803,49 @@ async function handleTranscriptUpdate(transcript: any): Promise<void> {
     sessionManager.addTranscript(currentMeetingId, transcriptData)
   }
   
-  return new Promise(async (resolve, reject) => {
-    chrome.storage.local.get(['meetings'], async (result) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message))
-        return
-      }
-      
-      const meetings: Meeting[] = result.meetings || []
-      const meetingIndex = meetings.findIndex(m => m.id === currentMeetingId)
-      
-      if (meetingIndex !== -1) {
+  // タイムアウト付きのPromiseを作成
+  const timeoutPromise = new Promise<void>((_, reject) => {
+    setTimeout(() => reject(new Error('Transcript update timeout')), 10000) // 10秒でタイムアウト
+  })
+  
+  // メイン処理のPromise
+  const mainPromise = new Promise<void>((resolve, reject) => {
+    // chrome.storage.local.getをPromise化
+    const getStorageData = () => {
+      return new Promise<{ meetings: Meeting[] }>((resolve, reject) => {
+        chrome.storage.local.get(['meetings'], (result) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message))
+          } else {
+            resolve({ meetings: result.meetings || [] })
+          }
+        })
+      })
+    }
+    
+    // chrome.storage.local.setをPromise化
+    const setStorageData = (data: { meetings: Meeting[] }) => {
+      return new Promise<void>((resolve, reject) => {
+        chrome.storage.local.set(data, () => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message))
+          } else {
+            resolve()
+          }
+        })
+      })
+    }
+    
+    // 非同期処理を順次実行
+    (async () => {
+      try {
+        const { meetings } = await getStorageData()
+        const meetingIndex = meetings.findIndex(m => m.id === currentMeetingId)
+        
+        if (meetingIndex === -1) {
+          throw new Error('Meeting not found')
+        }
+        
         // ストレージには最新のトランスクリプトのみ保存（メモリ効率化）
         const recentTranscripts = sessionManager.getTranscripts(currentMeetingId, TRANSCRIPT_BATCH_SIZE)
         meetings[meetingIndex].transcripts = recentTranscripts
@@ -803,45 +882,55 @@ async function handleTranscriptUpdate(transcript: any): Promise<void> {
           }
         }
         
-        chrome.storage.local.set({ meetings }, () => {
-          if (chrome.runtime.lastError) {
-            // ストレージエラーの場合、さらに古いデータを削除して再試行
-            if (chrome.runtime.lastError.message.includes('quota')) {
-              logger.error('Storage quota exceeded, attempting to free space')
+        // ストレージに保存
+        try {
+          await setStorageData({ meetings })
+          resolve()
+        } catch (error) {
+          // ストレージエラーの場合、さらに古いデータを削除して再試行
+          if (error instanceof Error && error.message.includes('quota')) {
+            logger.error('Storage quota exceeded, attempting to free space')
+            
+            // 最も古い会議を削除
+            if (meetings.length > 1) {
+              meetings.shift() // 最初の要素を削除
               
-              // 最も古い会議を削除
-              if (meetings.length > 1) {
-                meetings.shift() // 最初の要素を削除
-                
-                // 再度保存を試みる
-                chrome.storage.local.set({ meetings }, () => {
-                  if (chrome.runtime.lastError) {
-                    reject(new Error('Storage critically full: ' + chrome.runtime.lastError.message))
-                  } else {
-                    logger.info('Freed space by removing oldest meeting')
-                    resolve()
-                  }
-                })
-              } else {
-                reject(new Error('Storage quota exceeded and no meetings to delete'))
+              // 再度保存を試みる
+              try {
+                await setStorageData({ meetings })
+                logger.info('Freed space by removing oldest meeting')
+                resolve()
+              } catch (retryError) {
+                reject(new Error('Storage critically full: ' + retryError))
               }
             } else {
-              reject(new Error(chrome.runtime.lastError.message))
+              reject(new Error('Storage quota exceeded and no meetings to delete'))
             }
           } else {
-            resolve()
+            reject(error)
           }
-        })
-      } else {
-        reject(new Error('Meeting not found'))
+        }
+      } catch (error) {
+        reject(error)
       }
-    })
+    })()
   })
+  
+  // タイムアウトとメイン処理のどちらか早い方を返す
+  return Promise.race([mainPromise, timeoutPromise])
 }
 
 async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history' | 'default' }): Promise<any> {
+  // デバッグログ: 生成開始時の状態
+  logger.info('handleGenerateMinutes called', {
+    isMinutesGenerating,
+    currentMeetingId,
+    promptType: payload?.promptType || 'default'
+  })
+  
   // 既に議事録生成中の場合は待機
   if (isMinutesGenerating) {
+    logger.warn('Minutes generation already in progress', { isMinutesGenerating })
     return { success: false, error: '議事録を生成中です。しばらくお待ちください。' }
   }
 
@@ -876,7 +965,7 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
         // sync storageからも設定を読み込む
         chrome.storage.sync.get(['settings'], async (syncResult) => {
           if (chrome.runtime.lastError) {
-            console.warn('Failed to load sync settings:', chrome.runtime.lastError)
+            logger.warn('Failed to load sync settings:', chrome.runtime.lastError)
           }
           
           // localとsyncの設定をマージ（sync優先）
@@ -914,7 +1003,7 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
           
           // 字幕が異常に多い場合のみ警告
           if (allTranscripts.length > 1000) {
-            console.warn('Large number of transcripts:', {
+            logger.warn('Large number of transcripts:', {
               count: allTranscripts.length,
               totalCharacters: allTranscripts.reduce((sum, t) => sum + (t.text || t.content || '').length, 0)
             })
@@ -986,9 +1075,11 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
           meetings[meetingIndex].minutes = minutes
           
           chrome.storage.local.set({ meetings }, async () => {
+            logger.info('Minutes saved to storage, resetting flag')
             isMinutesGenerating = false // 生成完了をマーク
             
             if (chrome.runtime.lastError) {
+              logger.error('Storage error, resetting flag', chrome.runtime.lastError)
               // エラー時の状態更新
               await updateSharedState({
                 isMinutesGenerating: false
@@ -1008,6 +1099,7 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
               
               resolve({ success: false, error: chrome.runtime.lastError.message })
             } else {
+              logger.info('Minutes generation successful, resetting flag')
               // 成功時の状態更新
               await updateSharedState({
                 isMinutesGenerating: false,
@@ -1062,6 +1154,7 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
           })
         }
           } catch (error: any) {
+            logger.error('Minutes generation error, resetting flag', error)
             isMinutesGenerating = false // エラー時も生成完了をマーク
             
             // エラー時の状態更新
@@ -1090,14 +1183,50 @@ async function handleGenerateMinutes(payload?: { promptType?: 'live' | 'history'
       })
   }) 
   } catch (error) {
+    logger.error('Unexpected error in handleGenerateMinutes, resetting flag', error)
     isMinutesGenerating = false
+    
+    // 共有状態も更新
+    await updateSharedState({
+      isMinutesGenerating: false
+    })
+    
+    // 全タブに失敗を通知
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        if (tab.id) {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'MINUTES_GENERATION_FAILED',
+            payload: { error: 'Unexpected error occurred' }
+          }).catch(() => {})
+        }
+      })
+    })
+    
     return { success: false, error: 'Unexpected error occurred' }
   } finally {
     // タイムアウト保護: 30秒後に必ずフラグをリセット
-    setTimeout(() => {
+    setTimeout(async () => {
       if (isMinutesGenerating) {
-        console.warn('Resetting isMinutesGenerating flag due to timeout')
+        logger.warn('Resetting isMinutesGenerating flag due to timeout')
         isMinutesGenerating = false
+        
+        // 共有状態も更新
+        await updateSharedState({
+          isMinutesGenerating: false
+        })
+        
+        // 全タブに生成失敗を通知
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            if (tab.id) {
+              chrome.tabs.sendMessage(tab.id, {
+                type: 'MINUTES_GENERATION_FAILED',
+                payload: { error: 'タイムアウトしました' }
+              }).catch(() => {})
+            }
+          })
+        })
       }
     }, TIMING_CONSTANTS.DEFAULT_TIMEOUT)
   }

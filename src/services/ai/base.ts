@@ -355,7 +355,7 @@ export abstract class BaseAIService {
     
     // プロンプトサイズを制限
     if (combinedPrompt.length > MAX_PROMPT_SIZE) {
-      console.warn(`Prompt too large (${(combinedPrompt.length / 1024).toFixed(1)}KB), truncating...`)
+      logger.warn(`Prompt too large (${(combinedPrompt.length / 1024).toFixed(1)}KB), truncating...`)
       // 末尾をカットして省略マーカーを追加
       combinedPrompt = combinedPrompt.substring(0, MAX_PROMPT_SIZE - 100) + '\n\n[... 以下省略されました ...]'
     }
@@ -405,19 +405,19 @@ export abstract class BaseAIService {
       meetingStartTime = new Date()
     }
     
-    // 安全な日付フォーマットのためのヘルパー関数
-    const safeFormatDate = (date: Date, options: Intl.DateTimeFormatOptions): string => {
-      try {
-        if (isNaN(date.getTime())) {
-          logger.warn('Invalid date provided to safeFormatDate, using current date')
-          return new Date().toLocaleDateString('ja-JP', options)
-        }
-        return date.toLocaleDateString('ja-JP', options)
-      } catch (error) {
-        logger.error('Error formatting date:', error)
-        return new Date().toLocaleDateString('ja-JP', options)
-      }
-    }
+    // 安全な日付フォーマットのためのヘルパー関数（現在未使用だが将来のために残す）
+    // const safeFormatDate = (date: Date, options: Intl.DateTimeFormatOptions): string => {
+    //   try {
+    //     if (isNaN(date.getTime())) {
+    //       logger.warn('Invalid date provided to safeFormatDate, using current date')
+    //       return new Date().toLocaleDateString('ja-JP', options)
+    //     }
+    //     return date.toLocaleDateString('ja-JP', options)
+    //   } catch (error) {
+    //     logger.error('Error formatting date:', error)
+    //     return new Date().toLocaleDateString('ja-JP', options)
+    //   }
+    // }
     
     const safeFormatDateTime = (date: Date): string => {
       try {
@@ -435,11 +435,7 @@ export abstract class BaseAIService {
     // テンプレート変数を準備（議事録生成と同じセット）
     const templateVariables: Record<string, any> = {
       userName: userName || '不明な参加者',
-      meetingDate: safeFormatDate(meetingStartTime, { 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      }),
+      meetingDate: meetingStartTime.toISOString().split('T')[0], // YYYY-MM-DD形式
       startTime: safeFormatDateTime(meetingStartTime),
       participants: meeting.participants.join(', '),
       duration: durationText,
@@ -503,7 +499,7 @@ export abstract class BaseAIService {
         return this.processNextStepsData(parsed, meetingId)
       } catch (firstError) {
         // パースに失敗した場合、修正を試みる
-        console.warn('Initial JSON parse failed, attempting to fix:', firstError)
+        logger.warn('Initial JSON parse failed, attempting to fix:', firstError)
         
         // プロパティ名の修正（ただし既にクォートされているものは除外）
         jsonStr = jsonStr
@@ -670,7 +666,7 @@ export abstract class BaseAIService {
     
     // 各変数を置換
     Object.entries(variables).forEach(([key, value]) => {
-      const regex = new RegExp(`\{\{${key}\}\}`, 'g')
+      const regex = new RegExp(`{{${key}}}`, 'g')
       const matches = result.match(regex) || []
       
       // 値の型に応じて適切に変換

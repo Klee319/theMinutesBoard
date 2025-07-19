@@ -2,7 +2,7 @@ import { ChromeMessage } from '@/types'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler, ServiceWorkerKeepAlive } from '@/utils/chrome-error-handler'
 import { formatMarkdownToHTML } from '@/utils/markdown'
-import { CAPTION_SELECTORS, CAPTION_BUTTON_SELECTORS, SPEAKER_SELECTORS, LEAVE_BUTTON_SELECTORS, LEAVE_CONFIRM_SELECTORS } from '@/constants/selectors'
+import { CAPTION_SELECTORS, CAPTION_BUTTON_SELECTORS } from '@/constants/selectors'
 import { TIMING_CONFIG } from '@/constants/config'
 import './styles.css'
 
@@ -13,7 +13,7 @@ class TranscriptCapture {
   private lastCaption = ''
   private currentSpeaker = ''
   private isMinutesExpanded = false
-  private currentMinutes: any = null
+  private currentMinutes: { content: string; meetingId: string } | null = null
   private viewerTabId: number | null = null
   private hasGeneratedMinutes = false
   private callStatusObserver: MutationObserver | null = null
@@ -24,12 +24,12 @@ class TranscriptCapture {
   private currentParticipants: Set<string> = new Set()
   private cleanupTimeouts: Set<number> = new Set()
   private cleanupIntervals: Set<number> = new Set()
-  private captionCheckInterval: NodeJS.Timer | null = null
+  private captionCheckInterval: NodeJS.Timeout | null = null
   private lastCaptionCheckTime = Date.now()
-  private captionStatusInterval: NodeJS.Timer | null = null
+  private captionStatusInterval: NodeJS.Timeout | null = null
   
   // メモリ管理用の変数
-  private transcriptBuffer: any[] = []
+  private transcriptBuffer: { speaker: string; content: string }[] = []
   private lastFlushTime = Date.now()
   private flushInterval = TIMING_CONFIG.TRANSCRIPT_BUFFER_FLUSH_INTERVAL // 5秒ごとにバッファをフラッシュ
   private maxBufferSize = TIMING_CONFIG.TRANSCRIPT_BUFFER_SIZE // 最大バッファサイズ
@@ -516,10 +516,9 @@ class TranscriptCapture {
             this.isRecording = message.payload.isRecording
             this.updateRecordingUI(this.isRecording)
           }
-          if (message.payload.isMinutesGenerating) {
-            this.showLoadingState(true)
-          } else {
-            this.showLoadingState(false)
+          // isMinutesGeneratingの状態に基づいてローディング表示を更新
+          if (message.payload.isMinutesGenerating !== undefined) {
+            this.showLoadingState(message.payload.isMinutesGenerating)
           }
           sendResponse({ success: true })
           break
@@ -537,7 +536,7 @@ class TranscriptCapture {
           sendResponse({ success: true })
           break
           
-        case 'STORAGE_WARNING':
+        case 'STORAGE_WARNING': {
           const percentage = message.payload?.percentage || 0
           this.showNotification(
             `ストレージ容量が${percentage.toFixed(0)}%に達しました。古いデータは自動削除されます。`,
@@ -545,6 +544,7 @@ class TranscriptCapture {
           )
           sendResponse({ success: true })
           break
+        }
           
         case 'API_PROGRESS':
           // API進捗表示の更新
@@ -1393,13 +1393,11 @@ class TranscriptCapture {
     ]
     
     let captionElements: NodeListOf<Element> | null = null
-    let usedSelector = ''
     
     for (const selector of captionSelectors) {
       const elements = this.captionsContainer.querySelectorAll(selector)
       if (elements.length > 0) {
         captionElements = elements
-        usedSelector = selector
         logger.debug(`Found caption elements with selector: ${selector}, count: ${elements.length}`)
         break
       }
@@ -1631,7 +1629,7 @@ class TranscriptCapture {
       })
   }
   
-  private showMinutesPreview(minutes: any) {
+  private showMinutesPreview(minutes: { content: string; meetingId: string }) {
     this.currentMinutes = minutes
     this.hasGeneratedMinutes = true
     
@@ -1703,7 +1701,7 @@ class TranscriptCapture {
     }
   }
   
-  private updateMinutesContent(minutes: any) {
+  private updateMinutesContent(minutes: { content: string; meetingId: string }) {
     const minutesText = document.getElementById('minutes-text')
     if (minutesText) {
       // ライブダイジェスト部分のみを抽出
@@ -1800,7 +1798,7 @@ class TranscriptCapture {
   }
   
   
-  private setupModalListeners(modal: HTMLElement, minutes: any) {
+  private setupModalListeners(modal: HTMLElement, minutes: { content: string; meetingId: string }) {
     // 閉じるボタン
     const closeButtons = modal.querySelectorAll('.modal-close, .modal-close-btn')
     closeButtons.forEach(btn => {
@@ -1829,7 +1827,7 @@ class TranscriptCapture {
     })
   }
   
-  private exportMinutes(minutes: any, format: string) {
+  private exportMinutes(minutes: { content: string; meetingId: string }, format: string) {
     let content = ''
     let filename = `minutes_${new Date().toISOString().split('T')[0]}`
     let mimeType = ''
@@ -2112,7 +2110,15 @@ class TranscriptCapture {
     }
   }
 
-  private displayNextSteps(nextSteps: any[]) {
+  private displayNextSteps(nextSteps: Array<{
+    task: string;
+    isPending?: boolean;
+    status?: string;
+    priority?: string;
+    assignee?: string;
+    dueDate?: string;
+    notes?: string;
+  }>) {
     const listContainer = document.getElementById('nextsteps-list')
     if (!listContainer) return
     
@@ -2224,5 +2230,6 @@ class TranscriptCapture {
 const transcriptCapture = new TranscriptCapture()
 
 window.addEventListener('beforeunload', () => {
-  (transcriptCapture as any).cleanup()
+  // @ts-ignore - cleanup is private
+  transcriptCapture.cleanup()
 })

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense } from 'react'
-import { Meeting, Minutes } from '@/types'
+import { Meeting } from '@/types'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { logger } from '@/utils/logger'
 import { ChromeErrorHandler } from '@/utils/chrome-error-handler'
@@ -40,11 +40,12 @@ function App() {
   const [isLiveMode, setIsLiveMode] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [isDownloadDropdownOpen, setIsDownloadDropdownOpen] = useState(false)
+  const [isHistoryDownloadDropdownOpen, setIsHistoryDownloadDropdownOpen] = useState(false)
   const [isMinutesGenerating, setIsMinutesGenerating] = useState(false)
   const [currentTab, setCurrentTab] = useState<'history' | 'nextsteps'>('history')
   const [showNextStepsPanel, setShowNextStepsPanel] = useState(true)
   const [showResearchPanel, setShowResearchPanel] = useState(true)
-  const [isMobile, setIsMobile] = useState(false)
+  const [isMobile, setIsMobile] = useState(false) // eslint-disable-line @typescript-eslint/no-unused-vars
   const [isRecording, setIsRecording] = useState(false)
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
   const { isDarkMode, toggleDarkMode } = useDarkMode()
@@ -150,7 +151,7 @@ function App() {
       })
     
     // 状態同期のリスナーを設定
-    const handleMessage = (message: any) => {
+    const handleMessage = (message: { type: string; payload?: { isRecording?: boolean; isMinutesGenerating?: boolean } }) => {
       logger.debug('Viewer received message:', message.type)
       
       switch (message.type) {
@@ -194,7 +195,7 @@ function App() {
           loadData()
           
           // 通知を表示（オプション）
-          const meetingId = message.payload?.meetingId
+          const meetingId = (message.payload as { meetingId?: string })?.meetingId
           if (meetingId) {
             // 該当の会議を選択状態にする
             chrome.storage.local.get(['meetings'], (result) => {
@@ -252,6 +253,7 @@ function App() {
       const target = event.target as Element
       if (!target.closest('.relative')) {
         setIsDownloadDropdownOpen(false)
+        setIsHistoryDownloadDropdownOpen(false)
       }
     }
     
@@ -263,7 +265,7 @@ function App() {
       document.removeEventListener('click', handleClickOutside)
       chrome.runtime.onMessage.removeListener(handleMessage)
     }
-  }, [])
+  }, [isLiveMode, loadData]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 状態変更を監視
   useEffect(() => {
@@ -310,8 +312,12 @@ function App() {
   }
 
   const generateMinutes = () => {
-    if (!currentMeeting?.id) return
+    if (!currentMeeting?.id) {
+      logger.warn('[Download Debug] generateMinutes: No currentMeeting.id')
+      return
+    }
     
+    logger.debug('[Download Debug] generateMinutes called for meeting:', currentMeeting.id)
     setIsMinutesGenerating(true)
     
     ChromeErrorHandler.sendMessage({
@@ -321,9 +327,16 @@ function App() {
       }
     })
       .then(response => {
+        logger.debug('[Download Debug] generateMinutes response:', response)
         if (!response?.success) {
           alert('エラー: ' + (response?.error || '議事録の生成に失敗しました'))
           setIsMinutesGenerating(false)
+        } else {
+          logger.debug('[Download Debug] Minutes generation successful, reloading data...')
+          // 成功時もデータを再読み込み
+          setTimeout(() => {
+            loadData()
+          }, 1000)
         }
       })
       .catch(error => {
@@ -374,7 +387,7 @@ function App() {
         // フォールバック: 現在の日付を使用
         filename = `minutes_${new Date().toISOString().split('T')[0]}`
       }
-    } catch (error) {
+    } catch (_error) {
       // エラー時のフォールバック
       filename = `minutes_${new Date().toISOString().split('T')[0]}`
     }
@@ -410,6 +423,21 @@ function App() {
 
 
   const displayMeeting = selectedMeeting || currentMeeting
+  
+  // デバッグログ：ダウンロード機能の表示条件を確認
+  useEffect(() => {
+    if (displayMeeting) {
+      logger.debug('[Download Debug] displayMeeting:', {
+        id: displayMeeting.id,
+        title: displayMeeting.title,
+        hasMinutes: !!displayMeeting.minutes,
+        minutesContent: displayMeeting.minutes?.content ? displayMeeting.minutes.content.substring(0, 100) + '...' : 'なし',
+        transcriptsCount: displayMeeting.transcripts?.length || 0
+      })
+    } else {
+      logger.debug('[Download Debug] displayMeeting is null')
+    }
+  }, [displayMeeting])
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -732,6 +760,53 @@ function App() {
                               >
                                 📋 ネクストステップ
                               </button>
+                              
+                              {/* 履歴タブ用ダウンロードボタン */}
+                              {selectedMeeting?.minutes && (
+                                <div className="relative">
+                                  <button
+                                    onClick={() => setIsHistoryDownloadDropdownOpen(!isHistoryDownloadDropdownOpen)}
+                                    className="flex items-center gap-2 px-3 py-1 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors text-sm"
+                                  >
+                                    💾 ダウンロード
+                                    <svg className={`w-4 h-4 transition-transform ${isHistoryDownloadDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                  </button>
+                                  
+                                  {isHistoryDownloadDropdownOpen && (
+                                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-10">
+                                      <button
+                                        onClick={() => {
+                                          downloadMinutes('markdown')
+                                          setIsHistoryDownloadDropdownOpen(false)
+                                        }}
+                                        className="flex items-center gap-3 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                      >
+                                        📄 <span>Markdown (.md)</span>
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          downloadMinutes('txt')
+                                          setIsHistoryDownloadDropdownOpen(false)
+                                        }}
+                                        className="flex items-center gap-3 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                      >
+                                        📝 <span>テキスト (.txt)</span>
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          downloadMinutes('json')
+                                          setIsHistoryDownloadDropdownOpen(false)
+                                        }}
+                                        className="flex items-center gap-3 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                      >
+                                        💾 <span>JSON (.json)</span>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </>
                           )}
                         </div>
