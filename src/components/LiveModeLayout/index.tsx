@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Meeting } from '@/types'
-import ResizablePanel from '@/components/ResizablePanel'
+// import ResizablePanel from '@/components/ResizablePanel'
 import LiveMinutesPanel from '@/components/LiveMinutesPanel'
 import LiveNextStepsPanel from '@/components/LiveNextStepsPanel'
 import ResearchPanel from '@/components/ResearchPanel'
@@ -11,7 +11,7 @@ interface LiveModeLayoutProps {
   meeting: Meeting | null
   isMinutesGenerating: boolean
   onGenerateMinutes: () => void
-  onStopRecording: () => void
+  _onStopRecording: () => void
   isRecording?: boolean
   showNextStepsPanel?: boolean
   showResearchPanel?: boolean
@@ -26,7 +26,8 @@ function MobilePanelTabs({
   onManualUpdate,
   showResearchPanel,
   showNextStepsPanel,
-  onToggleResearchPanel
+  _onToggleResearchPanel,
+  isRecording
 }: {
   meeting: Meeting | null
   isMinutesGenerating: boolean
@@ -35,7 +36,8 @@ function MobilePanelTabs({
   onManualUpdate: () => void
   showResearchPanel: boolean
   showNextStepsPanel: boolean
-  onToggleResearchPanel: (show: boolean) => void
+  _onToggleResearchPanel: (show: boolean) => void
+  isRecording?: boolean
 }) {
   const [activeTab, setActiveTab] = useState<'minutes' | 'nextsteps' | 'research'>('minutes')
 
@@ -47,9 +49,9 @@ function MobilePanelTabs({
       }
     }
     
-    window.addEventListener('researchPanelToggled', handleResearchToggle as EventListener)
+    window.addEventListener('researchPanelToggled', handleResearchToggle as any)
     return () => {
-      window.removeEventListener('researchPanelToggled', handleResearchToggle as EventListener)
+      window.removeEventListener('researchPanelToggled', handleResearchToggle as any)
     }
   }, [activeTab])
 
@@ -146,7 +148,7 @@ const LiveModeLayout = React.memo(function LiveModeLayout({
   meeting,
   isMinutesGenerating,
   onGenerateMinutes,
-  onStopRecording,
+  _onStopRecording,
   isRecording = false,
   showNextStepsPanel: showNextStepsPanelProp = true,
   showResearchPanel: showResearchPanelProp = true
@@ -172,7 +174,7 @@ const LiveModeLayout = React.memo(function LiveModeLayout({
   
   // AIアシスタントのレスポンスを受信
   useEffect(() => {
-    const handleAIResponse = (message: any) => {
+    const handleAIResponse = (message: { type: string; payload?: { meetingId?: string; response?: string; duration?: number } }) => {
       if (message.type === 'AI_ASSISTANT_RESPONSE' && message.payload.meetingId === meeting?.id) {
         const newResponse = {
           id: Date.now().toString(),
@@ -284,7 +286,8 @@ const LiveModeLayout = React.memo(function LiveModeLayout({
             onManualUpdate={handleUpdate}
             showResearchPanel={showResearchPanel}
             showNextStepsPanel={showNextStepsPanel}
-            onToggleResearchPanel={() => {}}
+            _onToggleResearchPanel={() => {}}
+            isRecording={isRecording}
           />
         </div>
       ) : (
@@ -429,7 +432,7 @@ const LiveModeLayout = React.memo(function LiveModeLayout({
                   const startX = e.clientX
                   const startRightWidth = rightPanelWidth
                   const startMiddleWidth = middlePanelWidth
-                  const startLeftWidth = leftPanelWidth
+                  // const startLeftWidth = leftPanelWidth // 未使用
                   
                   const handleMouseMove = (e: MouseEvent) => {
                     const deltaX = ((e.clientX - startX) / window.innerWidth) * 100
@@ -480,7 +483,7 @@ const LiveModeLayout = React.memo(function LiveModeLayout({
                 e.preventDefault()
                 const startX = e.clientX
                 const startLeftWidth = leftPanelWidth
-                const startRightWidth = rightPanelWidth
+                // const startRightWidth = rightPanelWidth // 未使用
                 
                 const handleMouseMove = (e: MouseEvent) => {
                   const deltaX = ((e.clientX - startX) / window.innerWidth) * 100

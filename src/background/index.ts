@@ -2364,10 +2364,22 @@ async function handleAIAssistantProcess(payload: { meetingId: string; recordingD
       return { success: false, error: 'Meeting not found' }
     }
     
-    // AI処理用のセッション取得（既に削除されている可能性があるため、最近の字幕を使用）
-    const recentTranscripts = meeting.transcripts.slice(-50) // 最近の50件の字幕を使用
+    // AIアシスタントセッションから差分字幕を取得
+    const session = aiAssistantSessions.get(meetingId)
+    let transcriptsToProcess: Transcript[] = []
     
-    if (recentTranscripts.length === 0) {
+    if (session && session.transcripts && session.transcripts.length > 0) {
+      // セッションに保存された差分字幕を使用
+      transcriptsToProcess = session.transcripts
+      logger.info(`Using AI session transcripts for meeting ${meetingId}: ${transcriptsToProcess.length} transcripts`)
+    } else {
+      // フォールバック: 最近の字幕を使用（録音時間に基づいて推定）
+      const estimatedTranscriptCount = Math.max(10, Math.min(50, Math.floor(recordingDuration / 2)))
+      transcriptsToProcess = meeting.transcripts.slice(-estimatedTranscriptCount)
+      logger.warn(`Using fallback transcripts for meeting ${meetingId}: ${transcriptsToProcess.length} transcripts (estimated from ${recordingDuration}s recording)`)
+    }
+    
+    if (transcriptsToProcess.length === 0) {
       return { success: false, error: 'No transcripts available for processing' }
     }
     
@@ -2382,7 +2394,7 @@ async function handleAIAssistantProcess(payload: { meetingId: string; recordingD
     const enhancedService = new EnhancedAIService(settings)
     
     // 録音された内容から指示を抽出
-    const instructions = recentTranscripts
+    const instructions = transcriptsToProcess
       .map(t => t.content)
       .join(' ')
     
@@ -2455,6 +2467,12 @@ ${relevantContext ? `【関連する会議情報】\n${relevantContext}\n` : ''}
         }
       })
     })
+    
+    // 処理が完了したらセッションを削除
+    if (session) {
+      aiAssistantSessions.delete(meetingId)
+      logger.info(`AI Assistant session cleaned up for meeting: ${meetingId}`)
+    }
     
     logger.info('AI Assistant processing completed')
     return { success: true }
